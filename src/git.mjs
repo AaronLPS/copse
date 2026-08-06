@@ -3,6 +3,7 @@
  * here — this module answers questions, and src/decisions.mjs judges.
  */
 import { execFileSync } from 'node:child_process';
+import { lstatSync } from 'node:fs';
 
 /**
  * `gh` missing or refusing is instant — ENOENT or a non-zero exit come back in
@@ -72,7 +73,18 @@ export function mainWorktree({ cwd = process.cwd() } = {}) {
  * there `@{u}..HEAD` fails: read as "no output", that is zero unpushed for a
  * branch whose every commit is unpushed, and `drop` would destroy the lot.
  *
+ * `dirty` is `true | false | 'unknown'`, not a plain boolean. `git status
+ * --porcelain` is read with `allowFailure`, so a status git could not obtain
+ * (a corrupt index, a permissions problem, an interrupted git process) comes
+ * back as `null` — the same shape `allowFailure` gives a status that
+ * succeeded and had nothing to report. Collapsing both into `dirty: false`
+ * turns "could not ask" into "permission to remove", which is exactly the
+ * failure mode this module's own doc comment warns against for `unpushed`.
+ * `'unknown'` keeps that distinction visible to `removalBlockers`, which
+ * must treat it as its own blocker rather than as clean.
+ *
  * @param {string} path
+ * @returns {{ dirty: true | false | 'unknown', unpushed: number }}
  */
 export function worktreeState(path) {
   const dirty = git(['status', '--porcelain'], { cwd: path, allowFailure: true });
@@ -92,7 +104,36 @@ export function worktreeState(path) {
     unpushed = out ? out.split('\n').length : 0;
   }
 
-  return { dirty: dirty !== null && dirty !== '', unpushed };
+  const dirtyState = dirty === null ? 'unknown' : dirty !== '';
+  return { dirty: dirtyState, unpushed };
+}
+
+/**
+ * Whether a carried path is present, missing, or a symlink — checked without
+ * following the link.
+ *
+ * `existsSync` follows symlinks, so a *dangling* symlink at a carried path
+ * reads as "not present" — the exact gap that lets a write-through defeat
+ * `config.mjs`'s `pathProblem` validation, which rejects `..`, absolute paths
+ * and backslashes precisely to stop a carried path from writing outside the
+ * tree it targets. A symlink walks around all three checks: it can be
+ * committed and arrives with a clone, and `copyFileSync`/`cpSync` follow it,
+ * reading from or writing through whatever it points at. `lstatSync` sees the
+ * link itself, never its target, so a dangling link is reported as what it
+ * is rather than as an absence.
+ *
+ * @param {string} path
+ * @returns {'missing' | 'symlink' | 'present'}
+ */
+export function carryPathState(path) {
+  let stat;
+  try {
+    stat = lstatSync(path);
+  } catch (error) {
+    if (error.code === 'ENOENT') return 'missing';
+    throw error;
+  }
+  return stat.isSymbolicLink() ? 'symlink' : 'present';
 }
 
 /**

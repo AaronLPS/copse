@@ -9,14 +9,50 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { parseConfig } from '../src/config.mjs';
+import { commandDoctor } from '../src/commands/doctor.mjs';
 import { commandDrop } from '../src/commands/drop.mjs';
+import { commandList } from '../src/commands/list.mjs';
 import { commandNew } from '../src/commands/new.mjs';
-import { GroveError } from '../src/commands/new.mjs';
+
+/**
+ * commandList/commandDoctor print to stdout as part of their contract; that
+ * is fine in real use, but it is noise in test output that could obscure a
+ * real failure. Silence it around the call rather than changing the
+ * commands themselves.
+ */
+function withSilencedStdout(fn) {
+  const original = console.log;
+  console.log = () => {};
+  try {
+    return fn();
+  } finally {
+    console.log = original;
+  }
+}
+
+// A machine with a global `commit.gpgsign=true` or `core.hooksPath` set
+// would otherwise leak into every git command this suite runs — `git commit`
+// stopping to ask for a signing key, or a hook firing that this repository
+// never declared. Pointing GIT_CONFIG_GLOBAL/SYSTEM at /dev/null makes the
+// suite see only what makeRepo() sets up, regardless of the host's config.
+// Set on process.env (not just run()'s spawn options) because commandNew
+// and commandDrop shell out to git internally via src/git.mjs, which
+// inherits process.env rather than taking an env override.
+process.env.GIT_CONFIG_GLOBAL = '/dev/null';
+process.env.GIT_CONFIG_SYSTEM = '/dev/null';
 
 const config = parseConfig({
   baseBranch: 'devel',
@@ -25,7 +61,11 @@ const config = parseConfig({
 }).config;
 
 function run(cmd, args, cwd) {
-  execFileSync(cmd, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+  execFileSync(cmd, args, {
+    cwd,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' },
+  });
 }
 
 /** A repository with an `origin` that is a real bare repo on disk. */
@@ -63,11 +103,36 @@ test('new creates the derived directory and carries the ignored file', () => {
   }
 });
 
-test('new refuses a branch already checked out', () => {
+test('new refuses a branch whose directory already exists', () => {
   const { root, repo } = makeRepo();
   try {
     commandNew('feat/x', { cwd: repo, config });
-    assert.throws(() => commandNew('feat/x', { cwd: repo, config }), GroveError);
+    assert.throws(
+      () => commandNew('feat/x', { cwd: repo, config }),
+      /already exists/,
+      'this hits the existsSync(target) check first, not the "already checked out" one',
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('new refuses a branch already checked out, even with its directory gone', () => {
+  // The previous test's assertion only checked the error's *type*
+  // (GroveError), which both refusals throw, so it passed while actually
+  // exercising the existsSync(target) check — the worktrees().find(...)
+  // refusal was never reached. Removing the directory but leaving the
+  // branch's worktree registration in git (worktree list still reports it,
+  // "prunable", until pruned) reaches the intended check.
+  const { root, repo } = makeRepo();
+  try {
+    commandNew('feat/x', { cwd: repo, config });
+    rmSync(join(root, 'proj-feat-x'), { recursive: true, force: true });
+
+    assert.throws(
+      () => commandNew('feat/x', { cwd: repo, config }),
+      /already checked out/,
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -233,6 +298,125 @@ test('drop from a prefix-colliding sibling worktree is not blocked as "currently
 
     assert.ok(!existsSync(targetX), 'the target worktree was actually removed');
     assert.ok(existsSync(targetX2), 'the sibling worktree was left alone');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('doctor finds a carryFiles entry that does not exist in the repo, and names it', () => {
+  const missingConfig = parseConfig({
+    baseBranch: 'devel',
+    carryFiles: ['.env.test', '.env.absent'],
+    install: null,
+  }).config;
+
+  const { root, repo } = makeRepo();
+  try {
+    const result = withSilencedStdout(() => commandDoctor({ cwd: repo, config: missingConfig }));
+    assert.equal(result.ok, false);
+    assert.ok(
+      result.findings.some((f) => f.includes('.env.absent')),
+      'the finding names the missing file',
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('doctor reports ok when every declared carry path exists and nothing has drifted', () => {
+  const { root, repo } = makeRepo();
+  try {
+    const result = withSilencedStdout(() => commandDoctor({ cwd: repo, config }));
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.findings, []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('list counts a misnamed worktree directory as one drift', () => {
+  // pullRequestFor shells out to `gh` for each worktree; origin here is a
+  // local bare repo path, not a GitHub remote, so `gh pr list` fails fast
+  // (no network round trip) and pullRequestFor reports undefined either way
+  // — this stays hermetic whether or not `gh` is installed on the host.
+  const { root, repo } = makeRepo();
+  try {
+    commandNew('feat/x', { cwd: repo, config });
+    const target = join(root, 'proj-feat-x');
+    const misnamed = join(root, 'proj-not-the-derived-name');
+
+    // git worktree move keeps git's own bookkeeping consistent while
+    // producing a directory name that no longer matches directoryFor's
+    // expectation — the drift driftNote/commandList exist to catch.
+    run('git', ['worktree', 'move', target, misnamed], repo);
+
+    const drifted = withSilencedStdout(() => commandList({ cwd: repo, config }));
+    assert.equal(drifted, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('list reports zero drift when every directory matches its branch', () => {
+  const { root, repo } = makeRepo();
+  try {
+    commandNew('feat/x', { cwd: repo, config });
+    const drifted = withSilencedStdout(() => commandList({ cwd: repo, config }));
+    assert.equal(drifted, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('new refuses to copy through a symlinked carry path, and says why', () => {
+  // existsSync follows symlinks, so a dangling one at the repo-side carried
+  // path used to read as "not present" — rescued as if absent, and
+  // copyFileSync/cpSync would then write or read through the link. The
+  // worktree new already created must survive the refusal (see the "grove
+  // drop" naming below), rather than being silently left half-provisioned.
+  const { root, repo } = makeRepo();
+  try {
+    const outside = join(root, 'outside-target');
+    writeFileSync(outside, 'PAYLOAD\n');
+    rmSync(join(repo, '.env.test'));
+    symlinkSync(outside, join(repo, '.env.test'));
+
+    assert.throws(
+      () => commandNew('feat/x', { cwd: repo, config }),
+      (error) => /\.env\.test/.test(error.message) && /symlink/.test(error.message) && /grove drop feat\/x/.test(error.message),
+    );
+
+    const target = join(root, 'proj-feat-x');
+    assert.ok(existsSync(target), 'worktree add already ran; the half-built worktree is left in place');
+    assert.ok(!existsSync(join(target, '.env.test')), 'the symlink was never followed');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('drop refuses to rescue through a symlinked carry path in the repo, and leaves everything in place', () => {
+  // The concrete exploit this guards: a dangling symlink at the repo-side
+  // carried path reads as "the repo does not hold this file" under
+  // existsSync, so the file looks rescuable, and copyFileSync writes
+  // through the link to whatever it points at — even outside the repo.
+  const { root, repo } = makeRepo();
+  try {
+    commandNew('feat/x', { cwd: repo, config });
+    const target = join(root, 'proj-feat-x');
+
+    const outside = join(root, 'outside-victim');
+    writeFileSync(outside, 'original\n');
+    rmSync(join(repo, '.env.test'));
+    symlinkSync(outside, join(repo, '.env.test'));
+    writeFileSync(join(target, '.env.test'), 'PAYLOAD\n');
+
+    assert.throws(
+      () => commandDrop('feat/x', { cwd: repo, config }),
+      (error) => /\.env\.test/.test(error.message) && /symlink/.test(error.message),
+    );
+
+    assert.equal(readFileSync(outside, 'utf8'), 'original\n', 'nothing was written through the symlink');
+    assert.ok(existsSync(target), 'the worktree survived the refusal — nothing was lost');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

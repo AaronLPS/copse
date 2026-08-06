@@ -11,7 +11,7 @@ import { execFileSync } from 'node:child_process';
 import { copyFileSync, cpSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-import { git, mainWorktree, worktrees } from '../git.mjs';
+import { carryPathState, git, mainWorktree, worktrees } from '../git.mjs';
 import { directoryFor, parseBranchName } from '../naming.mjs';
 
 export class GroveError extends Error {}
@@ -39,9 +39,21 @@ export function commandNew(branch, { cwd = process.cwd(), config }) {
 
   console.log('→ copying the files git will not carry');
   let copied = 0;
+  // Carried paths that turned out to be symlinks in the main worktree. A
+  // symlink is refused rather than followed: copyFileSync/cpSync read
+  // through it, and a dangling one under existsSync used to read as "not
+  // present", which let it slip past as skipped instead of refused. Every
+  // refusal is collected and reported together rather than aborting the
+  // loop on the first one, so one bad carry path does not hide the rest.
+  const refused = [];
   for (const file of config.carryFiles) {
     const from = join(repoDir, file);
-    if (!existsSync(from)) {
+    const state = carryPathState(from);
+    if (state === 'symlink') {
+      refused.push(`${file} (a symlink in ${repoDir}; refused rather than followed)`);
+      continue;
+    }
+    if (state === 'missing') {
       console.log(`   – ${file} (not present in ${repoDir}; skipped)`);
       continue;
     }
@@ -52,7 +64,12 @@ export function commandNew(branch, { cwd = process.cwd(), config }) {
   }
   for (const dir of config.carryDirs) {
     const from = join(repoDir, dir);
-    if (!existsSync(from)) {
+    const state = carryPathState(from);
+    if (state === 'symlink') {
+      refused.push(`${dir} (a symlink in ${repoDir}; refused rather than followed)`);
+      continue;
+    }
+    if (state === 'missing') {
       console.log(`   – ${dir} (not present in ${repoDir}; skipped)`);
       continue;
     }
@@ -60,13 +77,32 @@ export function commandNew(branch, { cwd = process.cwd(), config }) {
     console.log(`   ✓ ${dir}`);
     copied += 1;
   }
-  if (copied === 0 && (config.carryFiles.length > 0 || config.carryDirs.length > 0)) {
+  if (copied === 0 && refused.length === 0 && (config.carryFiles.length > 0 || config.carryDirs.length > 0)) {
     console.log('   ! nothing was copied — the new worktree carries none of them');
+  }
+
+  // A failure from here on leaves a worktree that git worktree add already
+  // created — half-provisioned, not half-created. Name where it is and how
+  // to remove it, rather than leaving the caller to work that out from a
+  // bare error.
+  if (refused.length > 0) {
+    throw new GroveError(
+      `${target} exists but is only partly set up — refused to copy:\n` +
+        refused.map((r) => `  · ${r}`).join('\n') +
+        `\nFix the carried path(s) above, then remove this worktree with: grove drop ${branch}`,
+    );
   }
 
   if (config.install) {
     console.log(`→ ${config.install.join(' ')}`);
-    execFileSync(config.install[0], config.install.slice(1), { cwd: target, stdio: 'inherit' });
+    try {
+      execFileSync(config.install[0], config.install.slice(1), { cwd: target, stdio: 'inherit' });
+    } catch (error) {
+      throw new GroveError(
+        `${target} exists but ${config.install.join(' ')} failed:\n${error.message}\n` +
+          `Fix the problem and re-run it there, or remove the worktree with: grove drop ${branch}`,
+      );
+    }
   }
 
   console.log(`\n✓ ${target}\n  cd ${target}\n`);
