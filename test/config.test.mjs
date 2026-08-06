@@ -1,7 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import { DEFAULTS, parseConfig } from '../src/config.mjs';
+import { CONFIG_FILENAME, DEFAULTS, loadConfig, parseConfig } from '../src/config.mjs';
 
 test('an empty config is the defaults', () => {
   const result = parseConfig({});
@@ -64,4 +67,42 @@ test('install must be a non-empty command array when present', () => {
   assert.equal(parseConfig({ install: 'pnpm install' }).ok, false);
   assert.equal(parseConfig({ install: ['pnpm', 'install'] }).ok, true);
   assert.equal(parseConfig({ install: null }).ok, true);
+});
+
+test('loadConfig: a missing config file yields the defaults', () => {
+  // loadConfig is the only config path the CLI actually uses, and a missing
+  // file is the common case — a repository that has not opted into any
+  // grove settings still has to work.
+  const dir = mkdtempSync(join(tmpdir(), 'grove-config-'));
+  try {
+    const result = loadConfig(dir);
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.config, DEFAULTS);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('loadConfig: malformed JSON fails and names the file', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'grove-config-'));
+  try {
+    writeFileSync(join(dir, CONFIG_FILENAME), '{ not valid json');
+    const result = loadConfig(dir);
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join('\n'), new RegExp(CONFIG_FILENAME.replace('.', '\\.')));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('loadConfig: a well-formed config file is parsed the same as parseConfig would', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'grove-config-'));
+  try {
+    writeFileSync(join(dir, CONFIG_FILENAME), JSON.stringify({ baseBranch: 'devel' }));
+    const result = loadConfig(dir);
+    assert.equal(result.ok, true);
+    assert.equal(result.config.baseBranch, 'devel');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
