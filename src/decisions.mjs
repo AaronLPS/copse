@@ -14,7 +14,14 @@ import { directoryFor, parseBranchName } from './naming.mjs';
  * All of them, not the first: a caller who fixes one blocker and is then told
  * about the next learns to run the command repeatedly rather than to read it.
  *
- * @param {{ dirty: boolean, unpushed: number, isMain: boolean, isCurrent: boolean }} state
+ * `dirty` carries three states, not two: `true`, `false`, or `'unknown'` —
+ * the last for when `git status` itself could not be asked (see
+ * `git.mjs`'s `worktreeState`). Unknown is treated as its own blocker,
+ * named as such, rather than as `false`: a status that could not be
+ * obtained is not evidence the tree is clean, and folding it into "not
+ * dirty" would turn "could not ask" into permission to delete.
+ *
+ * @param {{ dirty: boolean | 'unknown', unpushed: number, isMain: boolean, isCurrent: boolean }} state
  * @returns {string[]}
  */
 export function removalBlockers({ dirty, unpushed, isMain, isCurrent }) {
@@ -27,7 +34,11 @@ export function removalBlockers({ dirty, unpushed, isMain, isCurrent }) {
       `${unpushed} unpushed commit(s) — push them, or drop the branch deliberately with git branch -D`,
     );
   }
-  if (dirty) blockers.push('uncommitted changes in the working tree');
+  if (dirty === 'unknown') {
+    blockers.push('could not determine whether the working tree is dirty — git status failed');
+  } else if (dirty) {
+    blockers.push('uncommitted changes in the working tree');
+  }
 
   return blockers;
 }

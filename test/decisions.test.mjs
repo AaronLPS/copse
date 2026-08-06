@@ -38,6 +38,22 @@ test('every blocker is reported at once, not just the first', () => {
   assert.equal(blockers.length, 4);
 });
 
+test('an unknown dirty state blocks removal, named as unknown rather than clean', () => {
+  // worktreeState reports 'unknown' when git status itself could not be
+  // asked. Folding that into `false` would turn "could not ask" into
+  // permission to delete — the exact failure mode this module warns about
+  // for `unpushed`, left standing for `dirty` until this fix.
+  const blockers = removalBlockers({ ...clean, dirty: 'unknown' });
+  assert.equal(blockers.length, 1);
+  assert.match(blockers[0], /could not determine/);
+});
+
+test('an unknown dirty state is not the same blocker as an actually-dirty tree', () => {
+  const known = removalBlockers({ ...clean, dirty: true });
+  const unknown = removalBlockers({ ...clean, dirty: 'unknown' });
+  assert.notEqual(known[0], unknown[0]);
+});
+
 test('rescuable files are those the worktree holds and the repo does not', () => {
   const rescue = rescuableFiles({
     inWorktree: ['.env.test', 'apps/extension/.env'],

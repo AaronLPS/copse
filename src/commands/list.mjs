@@ -28,8 +28,11 @@ export function commandList({ cwd = process.cwd(), config }) {
     const lookupBranch = pullRequestLookupBranch(entry);
     const pr = lookupBranch ? pullRequestFor(lookupBranch, { cwd: entry.path }) : undefined;
 
+    // dirty is true | false | 'unknown' (see worktreeState's comment); an
+    // unknown status must read as unknown, not silently as clean.
+    const dirtyFlag = dirty === 'unknown' ? 'dirty state unknown (git status failed)' : dirty ? 'uncommitted changes' : null;
     const flags = [
-      dirty ? 'uncommitted changes' : null,
+      dirtyFlag,
       unpushed ? `${unpushed} unpushed` : null,
       pullRequestNote(pr, { isMain: entry.isMain }),
     ].filter(Boolean);
