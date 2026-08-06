@@ -5,7 +5,7 @@
 import { copyFileSync, cpSync, mkdirSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 
-import { carryPathState, git, mainWorktree, worktreeState, worktrees } from '../git.mjs';
+import { carryPathState, escapingAncestor, git, mainWorktree, worktreeState, worktrees } from '../git.mjs';
 import { removalBlockers, rescuableFiles } from '../decisions.mjs';
 import { branchForSlug, parseBranchName } from '../naming.mjs';
 import { GroveError } from './new.mjs';
@@ -48,17 +48,26 @@ export function commandDrop(argument, { cwd = process.cwd(), config }) {
   // single file, so the two lists stay separate below.
   //
   // Presence is decided with carryPathState (lstat), not existsSync, and a
-  // symlink is refused rather than followed — but only when it would
+  // symlinked *leaf* is refused rather than followed. escapingAncestor
+  // catches the other half: a symlinked *intermediate* directory, which
+  // lstat on the leaf resolves straight through — `cfg -> /elsewhere` with a
+  // carried `cfg/.env.test` makes lstat report on whatever
+  // `/elsewhere/.env.test` is, "missing" if it is not there, which is
+  // exactly what let a rescue write through it undetected.
+  //
+  // Both kinds of refusal are gated the same way: only when the path would
   // actually be read from or written through during the rescue below, i.e.
   // only when it actually participates in rescuableFiles' rescue set:
-  //   - a worktree-side symlink is refused only when the repo side does not
-  //     already hold a real copy — that is exactly the condition under
-  //     which rescuableFiles would treat the path as rescuable and
-  //     copyFileSync/cpSync would read through the worktree-side link;
-  //   - a repo-side symlink is refused only when the worktree side holds a
-  //     real copy that would be copied onto it — the write-through case,
-  //     where copyFileSync/cpSync would follow the repo-side link and write
-  //     to whatever it points at, including outside the repository.
+  //   - a worktree-side symlink (leaf or ancestor) is refused only when the
+  //     repo side does not already hold a real copy — that is exactly the
+  //     condition under which rescuableFiles would treat the path as
+  //     rescuable and copyFileSync/cpSync would read through the
+  //     worktree-side link;
+  //   - a repo-side symlink (leaf or ancestor) is refused only when the
+  //     worktree side holds a real copy that would be copied onto it — the
+  //     write-through case, where copyFileSync/cpSync would follow the
+  //     repo-side link and write to whatever it points at, including
+  //     outside the repository.
   // A path that would never be touched by the rescue at all — e.g. the
   // worktree never carried it in the first place, because `grove new`
   // itself refused to copy through a repo-side symlink — must not block
@@ -78,6 +87,8 @@ export function commandDrop(argument, { cwd = process.cwd(), config }) {
     for (const path of paths) {
       const worktreeState = carryPathState(join(entry.path, path));
       const repoState = carryPathState(join(repoDir, path));
+      const worktreeEscape = escapingAncestor(entry.path, path);
+      const repoEscape = escapingAncestor(repoDir, path);
 
       if (worktreeState === 'present') worktreePresent.push(path);
       if (repoState === 'present') repoPresent.push(path);
@@ -87,6 +98,18 @@ export function commandDrop(argument, { cwd = process.cwd(), config }) {
       }
       if (repoState === 'symlink' && worktreeState === 'present') {
         refused.push(`${path} (a symlink in ${repoDir}; refused rather than followed)`);
+      }
+      if (worktreeEscape && repoState !== 'present') {
+        refused.push(
+          `${path} (passes through "${worktreeEscape}" in ${entry.path}, which resolves ` +
+            'outside the worktree; refused rather than followed)',
+        );
+      }
+      if (repoEscape && worktreeState === 'present') {
+        refused.push(
+          `${path} (passes through "${repoEscape}" in ${repoDir}, which resolves outside the ` +
+            'repository; refused rather than followed)',
+        );
       }
     }
     return { worktreePresent, repoPresent, refused };

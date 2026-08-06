@@ -11,7 +11,7 @@ import { execFileSync } from 'node:child_process';
 import { copyFileSync, cpSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-import { carryPathState, git, mainWorktree, worktrees } from '../git.mjs';
+import { carryPathState, escapingAncestor, git, mainWorktree, worktrees } from '../git.mjs';
 import { directoryFor, parseBranchName } from '../naming.mjs';
 
 export class GroveError extends Error {}
@@ -22,7 +22,22 @@ export function commandNew(branch, { cwd = process.cwd(), config }) {
   const parsed = parseBranchName(branch, config);
   if (!parsed.ok) throw new GroveError(parsed.reason);
 
-  const repoDir = mainWorktree({ cwd }).path;
+  const main = mainWorktree({ cwd });
+  if (main.bare) {
+    // directoryFor derives the sibling directory from the main worktree's
+    // own path — for a bare repository that path is the bare directory
+    // itself (conventionally `<project>.git`), so the new worktree would be
+    // named `<project>.git-feat-x` instead of anything resembling the
+    // project. Making that naming (and the rest of a bare-aware `new`) work
+    // is a real design question for a later plan, not a one-line fix — so
+    // this refuses cleanly instead of producing a worktree nobody would
+    // recognise.
+    throw new GroveError(
+      `${main.path} is a bare repository; grove new does not yet support creating worktrees ` +
+        'against a bare main repository',
+    );
+  }
+  const repoDir = main.path;
   const target = directoryFor(branch, config, { repoDir });
 
   if (existsSync(target)) throw new GroveError(`${target} already exists`);
@@ -39,43 +54,73 @@ export function commandNew(branch, { cwd = process.cwd(), config }) {
 
   console.log('→ copying the files git will not carry');
   let copied = 0;
-  // Carried paths that turned out to be symlinks in the main worktree. A
-  // symlink is refused rather than followed: copyFileSync/cpSync read
-  // through it, and a dangling one under existsSync used to read as "not
-  // present", which let it slip past as skipped instead of refused. Every
-  // refusal is collected and reported together rather than aborting the
-  // loop on the first one, so one bad carry path does not hide the rest.
+  // Carried paths that turned out to be symlinks, or that pass through one,
+  // on either side of the copy. A symlink is refused rather than followed:
+  // copyFileSync/cpSync read or write through it, and a dangling one under
+  // existsSync used to read as "not present", which let it slip past as
+  // skipped instead of refused. carryPathState catches a symlinked *leaf*;
+  // escapingAncestor catches a symlinked *intermediate directory* — lstat on
+  // the leaf resolves every segment before it, so `cfg -> /elsewhere` with a
+  // carried `cfg/.env.test` reads as whatever `/elsewhere/.env.test` is, not
+  // as "cfg is a symlink". Both the source (repoDir) and the destination
+  // (target — a symlink could be committed on the branch itself and arrive
+  // via the checkout `worktree add` just did) are checked; every refusal is
+  // collected and reported together rather than aborting the loop on the
+  // first one, so one bad carry path does not hide the rest.
   const refused = [];
-  for (const file of config.carryFiles) {
-    const from = join(repoDir, file);
-    const state = carryPathState(from);
-    if (state === 'symlink') {
-      refused.push(`${file} (a symlink in ${repoDir}; refused rather than followed)`);
-      continue;
+  function copyCarryPath(rel, copy) {
+    const from = join(repoDir, rel);
+    const sourceEscape = escapingAncestor(repoDir, rel);
+    if (sourceEscape) {
+      refused.push(
+        `${rel} (passes through "${sourceEscape}" in ${repoDir}, which resolves outside the ` +
+          'repository; refused rather than followed)',
+      );
+      return;
     }
-    if (state === 'missing') {
-      console.log(`   – ${file} (not present in ${repoDir}; skipped)`);
-      continue;
+    const sourceState = carryPathState(from);
+    if (sourceState === 'symlink') {
+      refused.push(`${rel} (a symlink in ${repoDir}; refused rather than followed)`);
+      return;
     }
-    mkdirSync(dirname(join(target, file)), { recursive: true });
-    copyFileSync(from, join(target, file));
-    console.log(`   ✓ ${file}`);
+    if (sourceState === 'missing') {
+      console.log(`   – ${rel} (not present in ${repoDir}; skipped)`);
+      return;
+    }
+
+    const to = join(target, rel);
+    const destEscape = escapingAncestor(target, rel);
+    if (destEscape) {
+      refused.push(
+        `${rel} (passes through "${destEscape}" in ${target}, which resolves outside the new ` +
+          'worktree; refused rather than followed)',
+      );
+      return;
+    }
+    const destState = carryPathState(to);
+    if (destState === 'symlink') {
+      refused.push(
+        `${rel} (a symlink already checked out at ${to}; refused rather than followed)`,
+      );
+      return;
+    }
+
+    copy(from, to);
+    console.log(`   ✓ ${rel}`);
     copied += 1;
   }
+
+  for (const file of config.carryFiles) {
+    copyCarryPath(file, (from, to) => {
+      mkdirSync(dirname(to), { recursive: true });
+      copyFileSync(from, to);
+    });
+  }
   for (const dir of config.carryDirs) {
-    const from = join(repoDir, dir);
-    const state = carryPathState(from);
-    if (state === 'symlink') {
-      refused.push(`${dir} (a symlink in ${repoDir}; refused rather than followed)`);
-      continue;
-    }
-    if (state === 'missing') {
-      console.log(`   – ${dir} (not present in ${repoDir}; skipped)`);
-      continue;
-    }
-    cpSync(from, join(target, dir), { recursive: true });
-    console.log(`   ✓ ${dir}`);
-    copied += 1;
+    copyCarryPath(dir, (from, to) => {
+      mkdirSync(dirname(to), { recursive: true });
+      cpSync(from, to, { recursive: true });
+    });
   }
   if (copied === 0 && refused.length === 0 && (config.carryFiles.length > 0 || config.carryDirs.length > 0)) {
     console.log('   ! nothing was copied — the new worktree carries none of them');

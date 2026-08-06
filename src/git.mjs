@@ -3,7 +3,8 @@
  * here — this module answers questions, and src/decisions.mjs judges.
  */
 import { execFileSync } from 'node:child_process';
-import { lstatSync } from 'node:fs';
+import { lstatSync, realpathSync } from 'node:fs';
+import { join, sep } from 'node:path';
 
 /**
  * `gh` missing or refusing is instant — ENOENT or a non-zero exit come back in
@@ -43,12 +44,20 @@ export function worktrees({ cwd = process.cwd() } = {}) {
 
   for (const line of out.split('\n')) {
     if (line.startsWith('worktree ')) {
-      current = { path: line.slice('worktree '.length), branch: null, detached: false };
+      current = { path: line.slice('worktree '.length), branch: null, detached: false, bare: false };
       entries.push(current);
     } else if (line.startsWith('branch ')) {
       current.branch = line.slice('branch refs/heads/'.length);
     } else if (line === 'detached') {
       current.detached = true;
+    } else if (line === 'bare') {
+      // A bare main repository (`git init --bare`, worktrees added onto it)
+      // emits `worktree <path>` then `bare` — no `branch`, no `detached`.
+      // Left unparsed, that reads as `{ branch: null, detached: false }`,
+      // which is indistinguishable from "on no branch and not detached" —
+      // a state that does not exist for a real working tree. driftNote then
+      // saw branch !== baseBranch forever and reported permanent drift.
+      current.bare = true;
     }
   }
 
@@ -134,6 +143,61 @@ export function carryPathState(path) {
     throw error;
   }
   return stat.isSymbolicLink() ? 'symlink' : 'present';
+}
+
+/**
+ * Whether some directory *above* a carry path's final component resolves
+ * outside `root` — the gap carryPathState leaves on purpose. carryPathState
+ * lstats only the final segment, because that is the only segment it is
+ * `new`/`drop`'s job to refuse to *follow* (it is the thing being read or
+ * written). But `lstat` does not stop at the final segment when resolving
+ * the segments before it — the kernel dereferences every intermediate
+ * symlink to get there. So a symlinked *intermediate* directory
+ * (`cfg -> /elsewhere`, carrying `cfg/.env.test`) makes `lstat('cfg/.env.test')`
+ * resolve straight through `cfg` and report on whatever `/elsewhere/.env.test`
+ * turns out to be — 'missing' if it does not exist there, which is exactly
+ * how `drop` mistook a rescue-worthy write for a no-op and copied through
+ * the link into `/elsewhere`.
+ *
+ * The check: walk the relative path's directory segments (not the final
+ * one — that is carryPathState's job), and for each that exists, resolve it
+ * fully with `realpathSync` and confirm the result still sits inside
+ * `root`'s own realpath. `..` and absolute segments are already rejected by
+ * `config.mjs`'s `pathProblem`, so the only way a literal descendant of
+ * `root` can resolve elsewhere is through a symlink somewhere in the chain —
+ * realpath collapses the whole chain in one call, so this does not need to
+ * know which segment it was. A segment that does not exist yet is not a
+ * containment question — it cannot point anywhere until something creates
+ * it — and is left to whatever mkdir/copy step runs next.
+ *
+ * @param {string} root the tree this path must stay inside — the main
+ *   worktree for the repo side of a carry, the worktree directory for the
+ *   worktree side
+ * @param {string} relPath the carry path, relative to root
+ * @returns {string | null} the relative ancestor segment that escapes, or
+ *   null if every existing ancestor stays inside `root`
+ */
+export function escapingAncestor(root, relPath) {
+  const realRoot = realpathSync(root);
+  const segments = relPath.split('/');
+  let literal = root;
+
+  // The final segment is the carried file or directory itself; whether *it*
+  // is a symlink is carryPathState's question, not this one.
+  for (let i = 0; i < segments.length - 1; i += 1) {
+    literal = join(literal, segments[i]);
+    let real;
+    try {
+      real = realpathSync(literal);
+    } catch (error) {
+      if (error.code === 'ENOENT') return null;
+      throw error;
+    }
+    if (real !== realRoot && !real.startsWith(realRoot + sep)) {
+      return segments.slice(0, i + 1).join('/');
+    }
+  }
+  return null;
 }
 
 /**
