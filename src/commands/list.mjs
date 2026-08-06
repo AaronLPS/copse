@@ -27,18 +27,32 @@ export function commandList({ cwd = process.cwd(), config }) {
     const note = driftNote(entry, config, { repoDir });
     if (note !== null) drifted += 1;
 
-    const { dirty, unpushed } = worktreeState(entry.path);
-    const lookupBranch = pullRequestLookupBranch(entry);
-    const pr = lookupBranch ? pullRequestFor(lookupBranch, { cwd: entry.path }) : undefined;
-
-    // dirty is true | false | 'unknown' (see worktreeState's comment); an
-    // unknown status must read as unknown, not silently as clean.
-    const dirtyFlag = dirty === 'unknown' ? 'dirty state unknown (git status failed)' : dirty ? 'uncommitted changes' : null;
-    const flags = [
-      dirtyFlag,
-      unpushed ? `${unpushed} unpushed` : null,
-      pullRequestNote(pr, { isMain: entry.isMain }),
-    ].filter(Boolean);
+    // A bare main repository has no working tree at all: no files to be
+    // dirty, no commits checked out to be ahead of a remote-tracking
+    // branch, no branch to ask gh about. Those are not measurements that
+    // failed — worktreeState's 'unknown' and pullRequestNote's "PR state
+    // unknown" both mean "asked and could not find out" — they are
+    // questions that do not apply here at all. Asking them anyway would
+    // print "dirty state unknown"/"PR state unknown" for a row that was
+    // never askable, which is the "an absence that was never measured is
+    // not an absence" confusion in reverse: a question never asked reading
+    // as one that was asked and failed. The bare label on the row itself
+    // (see `shown` below) already says why there is nothing here.
+    let flags = [];
+    if (!entry.bare) {
+      const { dirty, unpushed } = worktreeState(entry.path);
+      const lookupBranch = pullRequestLookupBranch(entry);
+      const pr = lookupBranch ? pullRequestFor(lookupBranch, { cwd: entry.path }) : undefined;
+      // dirty is true | false | 'unknown' (see worktreeState's comment); an
+      // unknown status must read as unknown, not silently as clean.
+      const dirtyFlag =
+        dirty === 'unknown' ? 'dirty state unknown (git status failed)' : dirty ? 'uncommitted changes' : null;
+      flags = [
+        dirtyFlag,
+        unpushed ? `${unpushed} unpushed` : null,
+        pullRequestNote(pr, { isMain: entry.isMain }),
+      ].filter(Boolean);
+    }
 
     const shown =
       note ??

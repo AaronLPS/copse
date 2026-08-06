@@ -5,7 +5,15 @@
 import { copyFileSync, cpSync, mkdirSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 
-import { carryPathState, escapingAncestor, git, mainWorktree, worktreeState, worktrees } from '../git.mjs';
+import {
+  carryPathState,
+  describeEscapingAncestor,
+  escapingAncestor,
+  git,
+  mainWorktree,
+  worktreeState,
+  worktrees,
+} from '../git.mjs';
 import { removalBlockers, rescuableFiles } from '../decisions.mjs';
 import { branchForSlug, parseBranchName } from '../naming.mjs';
 import { GroveError } from './new.mjs';
@@ -100,16 +108,10 @@ export function commandDrop(argument, { cwd = process.cwd(), config }) {
         refused.push(`${path} (a symlink in ${repoDir}; refused rather than followed)`);
       }
       if (worktreeEscape && repoState !== 'present') {
-        refused.push(
-          `${path} (passes through "${worktreeEscape}" in ${entry.path}, which resolves ` +
-            'outside the worktree; refused rather than followed)',
-        );
+        refused.push(describeEscapingAncestor(path, worktreeEscape, entry.path, 'the worktree'));
       }
       if (repoEscape && worktreeState === 'present') {
-        refused.push(
-          `${path} (passes through "${repoEscape}" in ${repoDir}, which resolves outside the ` +
-            'repository; refused rather than followed)',
-        );
+        refused.push(describeEscapingAncestor(path, repoEscape, repoDir, 'the repository'));
       }
     }
     return { worktreePresent, repoPresent, refused };

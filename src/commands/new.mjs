@@ -11,7 +11,14 @@ import { execFileSync } from 'node:child_process';
 import { copyFileSync, cpSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-import { carryPathState, escapingAncestor, git, mainWorktree, worktrees } from '../git.mjs';
+import {
+  carryPathState,
+  describeEscapingAncestor,
+  escapingAncestor,
+  git,
+  mainWorktree,
+  worktrees,
+} from '../git.mjs';
 import { directoryFor, parseBranchName } from '../naming.mjs';
 
 export class GroveError extends Error {}
@@ -72,10 +79,7 @@ export function commandNew(branch, { cwd = process.cwd(), config }) {
     const from = join(repoDir, rel);
     const sourceEscape = escapingAncestor(repoDir, rel);
     if (sourceEscape) {
-      refused.push(
-        `${rel} (passes through "${sourceEscape}" in ${repoDir}, which resolves outside the ` +
-          'repository; refused rather than followed)',
-      );
+      refused.push(describeEscapingAncestor(rel, sourceEscape, repoDir, 'the repository'));
       return;
     }
     const sourceState = carryPathState(from);
@@ -91,10 +95,7 @@ export function commandNew(branch, { cwd = process.cwd(), config }) {
     const to = join(target, rel);
     const destEscape = escapingAncestor(target, rel);
     if (destEscape) {
-      refused.push(
-        `${rel} (passes through "${destEscape}" in ${target}, which resolves outside the new ` +
-          'worktree; refused rather than followed)',
-      );
+      refused.push(describeEscapingAncestor(rel, destEscape, target, 'the new worktree'));
       return;
     }
     const destState = carryPathState(to);

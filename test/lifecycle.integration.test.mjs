@@ -10,6 +10,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import {
+  appendFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -40,6 +41,19 @@ function withSilencedStdout(fn) {
   console.log = () => {};
   try {
     return fn();
+  } finally {
+    console.log = original;
+  }
+}
+
+/** Like withSilencedStdout, but keeps every printed line for inspection. */
+function captureStdout(fn) {
+  const original = console.log;
+  const lines = [];
+  console.log = (...args) => lines.push(args.join(' '));
+  try {
+    fn();
+    return lines;
   } finally {
     console.log = original;
   }
@@ -573,6 +587,109 @@ test('new refuses to copy through a symlinked intermediate directory — carryDi
   }
 });
 
+test('new refuses to write through a symlinked intermediate directory already checked out at the destination', () => {
+  // Mirrors the source-side intermediate-directory test above, but for the
+  // destination: the *commit* on devel — what a freshly created worktree
+  // checks out — holds `cfg` as a symlink to somewhere outside the new
+  // worktree, while the repo's own local working copy (grove's copy
+  // *source*) is a real directory. That divergence is what forces the code
+  // path all the way to the destination ancestor check (new.mjs's
+  // destEscape) rather than stopping earlier at the source-side one.
+  const { root, repo } = makeRepo();
+  try {
+    const outsideDest = join(root, 'outside-dest-dir');
+    mkdirSync(outsideDest);
+
+    symlinkSync(outsideDest, join(repo, 'cfg'));
+    run('git', ['add', '-A'], repo);
+    run('git', ['commit', '-m', 'commit a symlinked cfg directory'], repo);
+    run('git', ['push', 'origin', 'devel'], repo);
+
+    // Diverge the local working copy from what devel actually holds: a
+    // real directory with a real file sits where the commit — and so the
+    // freshly checked-out worktree — has a symlinked directory.
+    rmSync(join(repo, 'cfg'));
+    mkdirSync(join(repo, 'cfg'));
+    writeFileSync(join(repo, 'cfg', '.env.test'), 'PAYLOAD\n');
+
+    assert.throws(
+      () => commandNew('feat/x', { cwd: repo, config: nestedConfig }),
+      (error) =>
+        error instanceof GroveError &&
+        /cfg\/\.env\.test/.test(error.message) &&
+        /"cfg"/.test(error.message) &&
+        /resolves outside/.test(error.message),
+    );
+
+    assert.ok(
+      !existsSync(join(outsideDest, '.env.test')),
+      'nothing was written through the destination-side symlinked intermediate directory',
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('new refuses to copy through a dangling symlinked intermediate directory, by name', () => {
+  // realpathSync throws ENOENT resolving *through* a dangling symlink
+  // (`cfg -> /nonexistent`), which is a different failure than the segment
+  // not existing at all (lstat proves the link itself is there). Folding
+  // the two together let a dangling ancestor slip past escapingAncestor
+  // entirely — treated as "nothing to check yet" — so the code proceeded
+  // into copying and died with a raw ENOENT instead of naming the problem.
+  const { root, repo } = makeRepo();
+  try {
+    symlinkSync(join(root, 'nonexistent-target'), join(repo, 'cfg'));
+
+    assert.throws(
+      () => commandNew('feat/x', { cwd: repo, config: nestedConfig }),
+      (error) =>
+        error instanceof GroveError &&
+        /cfg\/\.env\.test/.test(error.message) &&
+        /"cfg"/.test(error.message) &&
+        /does not resolve to anything/.test(error.message),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('drop refuses to rescue through a dangling symlinked intermediate directory, by name, rather than crashing mid-rescue', () => {
+  // The concrete regression this closes: before the fix, a dangling
+  // ancestor read as "nothing to check" from escapingAncestor's point of
+  // view, so drop proceeded into its rescue, called mkdirSync on the same
+  // dangling path, and died with a raw `Error: ENOENT ... mkdir` — not a
+  // GroveError, no named reason, and potentially after other carry paths
+  // had already been rescued.
+  const { root, repo } = makeRepo();
+  try {
+    // makeRepo() never creates cfg/.env.test in the repo, so commandNew has
+    // nothing to carry (it skips it, as tested elsewhere) — that is fine
+    // here; the point is the worktree holding the only copy, same as the
+    // rescue tests above. Put the real file in the worktree directly, then
+    // dangle the repo-side ancestor before dropping.
+    commandNew('feat/x', { cwd: repo, config: nestedConfig });
+    const target = join(root, 'proj-feat-x');
+    mkdirSync(join(target, 'cfg'), { recursive: true });
+    writeFileSync(join(target, 'cfg', '.env.test'), 'PAYLOAD\n');
+
+    symlinkSync(join(root, 'nonexistent-rescue-target'), join(repo, 'cfg'));
+
+    assert.throws(
+      () => commandDrop('feat/x', { cwd: repo, config: nestedConfig }),
+      (error) =>
+        error instanceof GroveError &&
+        /cfg\/\.env\.test/.test(error.message) &&
+        /"cfg"/.test(error.message) &&
+        /does not resolve to anything/.test(error.message),
+    );
+
+    assert.ok(existsSync(target), 'the worktree survived the refusal — nothing was lost');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('drop refuses to rescue through a symlinked intermediate directory in the repo', () => {
   // The exact transcript this closes: repo/cfg is a symlink to somewhere
   // outside the repo; the worktree holds a real cfg/.env.test. lstat on the
@@ -597,6 +714,52 @@ test('drop refuses to rescue through a symlinked intermediate directory in the r
     );
 
     assert.ok(!existsSync(join(outside, '.env.test')), 'nothing was written through the symlink');
+    assert.ok(existsSync(target), 'the worktree survived the refusal — nothing was lost');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('drop refuses to rescue by reading through a symlinked intermediate directory in the worktree', () => {
+  // The read-through / exfiltration direction, mirroring the repo-side
+  // (write-through) test above: the worktree's carried directory is a
+  // symlink to somewhere outside the worktree, and the repo holds no copy
+  // of its own — the exact condition under which rescuableFiles would treat
+  // the path as "the worktree holds the only copy" and copyFileSync would
+  // read straight through the symlink into the repo.
+  const { root, repo } = makeRepo();
+  try {
+    commandNew('feat/x', { cwd: repo, config: nestedConfig });
+    const target = join(root, 'proj-feat-x');
+
+    rmSync(join(repo, 'cfg'), { recursive: true, force: true });
+    const outside = join(root, 'outside-exfil-dir');
+    mkdirSync(outside);
+    writeFileSync(join(outside, '.env.test'), 'SECRET\n');
+    rmSync(join(target, 'cfg'), { recursive: true, force: true });
+    // .gitignore only covers the leaf name '.env.test', not 'cfg' itself —
+    // an untracked directory holding only ignored content is invisible to
+    // `git status`, but a plain symlink named 'cfg' is a new, un-ignored
+    // entry and would otherwise make the worktree read as dirty before
+    // drop ever reaches the check this test is for. Exclude it locally
+    // (not committed — this is a property of the test fixture, not of the
+    // repository grove is asked to support) so the refusal under test is
+    // the one actually exercised.
+    appendFileSync(join(repo, '.git', 'info', 'exclude'), 'cfg\n');
+    symlinkSync(outside, join(target, 'cfg'));
+
+    assert.throws(
+      () => commandDrop('feat/x', { cwd: repo, config: nestedConfig }),
+      (error) =>
+        /cfg\/\.env\.test/.test(error.message) &&
+        /"cfg"/.test(error.message) &&
+        /resolves outside/.test(error.message),
+    );
+
+    assert.ok(
+      !existsSync(join(repo, 'cfg', '.env.test')),
+      'nothing was read through the symlink into the repo',
+    );
     assert.ok(existsSync(target), 'the worktree survived the refusal — nothing was lost');
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -733,6 +896,43 @@ test('driftNote does not report a real bare main repository as permanent drift',
     // print 'null' as a branch name being one of the concrete symptoms
     // named in the bug report.
     withSilencedStdout(() => commandList({ cwd: bareDir, config }));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('list does not print a failed measurement for a bare main repository', () => {
+  // worktreeState's 'unknown' and pullRequestNote's "PR state unknown" both
+  // mean "asked and could not find out" — a real fact about an attempt that
+  // failed. A bare main repository has no working tree to run `git status`
+  // in and no branch to ask `gh` about at all; that is a question that does
+  // not apply, not one that was asked and failed, and printing it as the
+  // latter is exactly the confusion "an absence that was never measured is
+  // not an absence" exists to prevent, in reverse.
+  const { root, bareDir } = makeBareRepo();
+  try {
+    const lines = captureStdout(() => commandList({ cwd: bareDir, config }));
+    const bareRowIndex = lines.findIndex((line) => line.includes('(bare)'));
+    assert.notEqual(bareRowIndex, -1, 'sanity: the bare row was printed');
+
+    // A row's own line always starts with its (non-blank) relative path
+    // right after the two-space indent; a flags continuation line instead
+    // starts with the blank-padded column, i.e. more whitespace. Distinguish
+    // "no flags line was printed for the bare row at all" (the fix) from "a
+    // flags line was printed but happens not to mention these words" (not
+    // the fix) using that shape, rather than asserting on the next line's
+    // content regardless of whether it is even the bare row's own flags.
+    const next = lines[bareRowIndex + 1] ?? '';
+    const nextIsAFlagsLine = /^ {2}\s/.test(next);
+    if (nextIsAFlagsLine) {
+      assert.doesNotMatch(next, /dirty state unknown/);
+      assert.doesNotMatch(next, /PR state unknown/);
+      assert.doesNotMatch(next, /unpushed/);
+    }
+    // The real assertion: worktreeState/pullRequestFor were never even
+    // asked for the bare entry, so there is nothing to print — no flags
+    // line follows the bare row at all.
+    assert.equal(nextIsAFlagsLine, false, 'no flags line was printed for the bare main entry');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

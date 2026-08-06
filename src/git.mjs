@@ -170,12 +170,24 @@ export function carryPathState(path) {
  * containment question — it cannot point anywhere until something creates
  * it — and is left to whatever mkdir/copy step runs next.
  *
+ * A *dangling* escaping symlink — `cfg -> /nonexistent` — is its own case,
+ * not folded into "does not exist yet". `lstat` proves the segment itself
+ * exists; it is `realpathSync` resolving *through* it that fails with
+ * ENOENT, because what it points at is gone. Treating that the same as a
+ * segment that was never created lets it slip past this check entirely —
+ * `drop` would then proceed into a rescue, `mkdirSync` the same dangling
+ * path, and die with a raw `ENOENT`, not a named refusal, possibly after
+ * other carry paths were already rescued. A carried path passing through a
+ * dangling symlink is refused just like one passing through a live escape,
+ * with a reason that says which of the two it is.
+ *
  * @param {string} root the tree this path must stay inside — the main
  *   worktree for the repo side of a carry, the worktree directory for the
  *   worktree side
  * @param {string} relPath the carry path, relative to root
- * @returns {string | null} the relative ancestor segment that escapes, or
- *   null if every existing ancestor stays inside `root`
+ * @returns {{ via: string, dangling: boolean } | null} the relative
+ *   ancestor segment that escapes (or dangles) and which of the two it is,
+ *   or null if every existing ancestor stays inside `root`
  */
 export function escapingAncestor(root, relPath) {
   const realRoot = realpathSync(root);
@@ -186,18 +198,53 @@ export function escapingAncestor(root, relPath) {
   // is a symlink is carryPathState's question, not this one.
   for (let i = 0; i < segments.length - 1; i += 1) {
     literal = join(literal, segments[i]);
-    let real;
+
+    // lstat first: distinguishes "this segment does not exist yet" (ENOENT
+    // here — not a containment question, nothing can point anywhere until
+    // something creates it) from "this segment exists but is a dangling
+    // symlink" (ENOENT only on the realpath call below, because lstat just
+    // proved the link itself is there).
     try {
-      real = realpathSync(literal);
+      lstatSync(literal);
     } catch (error) {
       if (error.code === 'ENOENT') return null;
       throw error;
     }
+
+    let real;
+    try {
+      real = realpathSync(literal);
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        return { via: segments.slice(0, i + 1).join('/'), dangling: true };
+      }
+      throw error;
+    }
     if (real !== realRoot && !real.startsWith(realRoot + sep)) {
-      return segments.slice(0, i + 1).join('/');
+      return { via: segments.slice(0, i + 1).join('/'), dangling: false };
     }
   }
   return null;
+}
+
+/**
+ * The one-line refusal reason for an `escapingAncestor` result, shared by
+ * `new` and `drop` so a live escape and a dangling one read consistently on
+ * both the repo side and the worktree side rather than each caller wording
+ * it slightly differently.
+ *
+ * @param {string} relPath the carry path
+ * @param {{ via: string, dangling: boolean }} escape escapingAncestor's result
+ * @param {string} root the directory the escape was checked against
+ * @param {string} insideLabel what to call `root` in the message, e.g.
+ *   "the repository" or "the new worktree"
+ */
+export function describeEscapingAncestor(relPath, escape, root, insideLabel) {
+  return escape.dangling
+    ? `${relPath} (passes through "${escape.via}" in ${root}, a symlink that does not resolve ` +
+        'to anything; refused rather than followed)'
+    : `${relPath} (passes through "${escape.via}" in ${root}, which resolves outside ${insideLabel}; ` +
+        'refused rather than followed)';
 }
 
 /**
