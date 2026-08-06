@@ -18,7 +18,10 @@ const USAGE = `
   The directory is derived from the branch. Configure in grove.config.json.
 `;
 
-const DEBUG = Boolean(process.env.GROVE_DEBUG);
+// Boolean(process.env.GROVE_DEBUG) treats the string "0" as truthy — it is
+// a non-empty string like any other — so GROVE_DEBUG=0, meant to mean "off",
+// turned debug mode on. Only unset, empty, and the literal "0" mean off.
+const DEBUG = !['', '0', undefined].includes(process.env.GROVE_DEBUG);
 
 function die(message) {
   console.error(`\n✗ ${message}\n`);
