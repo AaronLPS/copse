@@ -1,0 +1,13 @@
+{
+  "name": "grove",
+  "version": "0.0.0",
+  "description": "Many agent sessions, one repository, no collisions.",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "bin": { "grove": "./src/cli.mjs" },
+  "files": ["src"],
+  "scripts": {
+    "test": "node --test test/"
+  },
+  "license": "MIT"
+}
