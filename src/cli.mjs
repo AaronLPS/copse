@@ -7,6 +7,7 @@ import { mainWorktree } from './git.mjs';
 import { GroveError, commandNew } from './commands/new.mjs';
 import { commandList } from './commands/list.mjs';
 import { commandDrop } from './commands/drop.mjs';
+import { commandDoctor } from './commands/doctor.mjs';
 
 const USAGE = `
   grove new <prefix>/<lower-kebab>   worktree off the base branch, files carried
@@ -56,6 +57,10 @@ try {
     case 'drop':
       commandDrop(argument, { config });
       break;
+    case 'doctor': {
+      const { ok } = commandDoctor({ config });
+      process.exit(ok ? 0 : 1);
+    }
     default:
       console.log(USAGE);
       process.exit(1);
