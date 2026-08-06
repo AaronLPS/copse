@@ -2,6 +2,7 @@
   "name": "grove",
   "version": "0.0.0",
   "description": "Many agent sessions, one repository, no collisions.",
+  "keywords": ["git", "worktree", "cli", "agent", "multi-agent"],
   "type": "module",
   "engines": { "node": ">=20" },
   "bin": { "grove": "./src/cli.mjs" },
