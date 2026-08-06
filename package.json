@@ -7,7 +7,7 @@
   "bin": { "grove": "./src/cli.mjs" },
   "files": ["src"],
   "scripts": {
-    "test": "node --test test/"
+    "test": "node --test test/*.mjs"
   },
   "license": "MIT"
 }
