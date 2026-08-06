@@ -6,6 +6,7 @@ import { loadConfig } from './config.mjs';
 import { mainWorktree } from './git.mjs';
 import { GroveError, commandNew } from './commands/new.mjs';
 import { commandList } from './commands/list.mjs';
+import { commandDrop } from './commands/drop.mjs';
 
 const USAGE = `
   grove new <prefix>/<lower-kebab>   worktree off the base branch, files carried
@@ -51,6 +52,9 @@ try {
       break;
     case 'list':
       commandList({ config });
+      break;
+    case 'drop':
+      commandDrop(argument, { config });
       break;
     default:
       console.log(USAGE);
