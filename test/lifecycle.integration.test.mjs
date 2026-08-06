@@ -334,6 +334,29 @@ test('doctor reports ok when every declared carry path exists and nothing has dr
   }
 });
 
+test('doctor names a carryFiles entry that is a symlink, distinct from one that is simply missing', () => {
+  // existsSync follows symlinks, so a dangling one used to read as "not in
+  // <repoDir>" — the same finding as a path that was never carried at all —
+  // hiding the reason `new`/`drop` actually refuse it. carryPathState
+  // (lstat) must report the symlink as what it is.
+  const { root, repo } = makeRepo();
+  try {
+    const outside = join(root, 'outside-target');
+    writeFileSync(outside, 'PAYLOAD\n');
+    rmSync(join(repo, '.env.test'));
+    symlinkSync(outside, join(repo, '.env.test'));
+
+    const result = withSilencedStdout(() => commandDoctor({ cwd: repo, config }));
+    assert.equal(result.ok, false);
+    assert.ok(
+      result.findings.some((f) => f.includes('.env.test') && /symlink/.test(f)),
+      'the finding names the path as a symlink, not merely "not in <repoDir>"',
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('list counts a misnamed worktree directory as one drift', () => {
   // pullRequestFor shells out to `gh` for each worktree; origin here is a
   // local bare repo path, not a GitHub remote, so `gh pr list` fails fast
@@ -417,6 +440,43 @@ test('drop refuses to rescue through a symlinked carry path in the repo, and lea
 
     assert.equal(readFileSync(outside, 'utf8'), 'original\n', 'nothing was written through the symlink');
     assert.ok(existsSync(target), 'the worktree survived the refusal — nothing was lost');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a repo-side symlinked carry path that new refused to copy does not deadlock drop', () => {
+  // The regression this guards: `new`'s refusal to copy through a repo-side
+  // symlink left the worktree without a copy of the carried path at all —
+  // so rescuableFiles' rescue set is empty for it — yet `drop`'s old,
+  // unconditional refusal fired anyway (it saw the same repo-side symlink
+  // and refused regardless of whether the worktree held anything to
+  // rescue). That deadlocked `new` and `drop` against each other with no
+  // way out except `git worktree remove` by hand. A repository that
+  // legitimately symlinks a carried path (e.g. `.env` into a shared
+  // secrets directory) must still be able to `grove drop` its worktrees.
+  const { root, repo } = makeRepo();
+  try {
+    const outside = join(root, 'outside-target');
+    writeFileSync(outside, 'PAYLOAD\n');
+    rmSync(join(repo, '.env.test'));
+    symlinkSync(outside, join(repo, '.env.test'));
+
+    assert.throws(
+      () => commandNew('feat/x', { cwd: repo, config }),
+      (error) => /\.env\.test/.test(error.message) && /symlink/.test(error.message),
+    );
+
+    const target = join(root, 'proj-feat-x');
+    assert.ok(existsSync(target), 'the half-built worktree from worktree add is left in place');
+    assert.ok(!existsSync(join(target, '.env.test')), 'the copy never happened — nothing to rescue');
+
+    // The deadlock: before the fix, this second call refused too, with no
+    // way to remove the worktree short of `git worktree remove` by hand.
+    commandDrop('feat/x', { cwd: repo, config });
+
+    assert.ok(!existsSync(target), 'drop succeeded — the worktree was removed');
+    assert.equal(readFileSync(outside, 'utf8'), 'PAYLOAD\n', 'the symlink target was never touched');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

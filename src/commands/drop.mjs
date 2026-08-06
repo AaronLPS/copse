@@ -48,40 +48,54 @@ export function commandDrop(argument, { cwd = process.cwd(), config }) {
   // single file, so the two lists stay separate below.
   //
   // Presence is decided with carryPathState (lstat), not existsSync, and a
-  // symlink on either side is refused rather than followed. existsSync
-  // follows symlinks: a *dangling* one at the repo-side path used to read as
-  // "the repo does not hold this file", which made the file look rescuable
-  // and sent copyFileSync writing through the link to whatever it points
-  // at — including outside the repository entirely. Every refusal is
-  // collected and reported together, and drop stops before touching
-  // anything, rather than rescuing what it safely can and silently losing
-  // the rest.
+  // symlink is refused rather than followed — but only when it would
+  // actually be read from or written through during the rescue below, i.e.
+  // only when it actually participates in rescuableFiles' rescue set:
+  //   - a worktree-side symlink is refused only when the repo side does not
+  //     already hold a real copy — that is exactly the condition under
+  //     which rescuableFiles would treat the path as rescuable and
+  //     copyFileSync/cpSync would read through the worktree-side link;
+  //   - a repo-side symlink is refused only when the worktree side holds a
+  //     real copy that would be copied onto it — the write-through case,
+  //     where copyFileSync/cpSync would follow the repo-side link and write
+  //     to whatever it points at, including outside the repository.
+  // A path that would never be touched by the rescue at all — e.g. the
+  // worktree never carried it in the first place, because `grove new`
+  // itself refused to copy through a repo-side symlink — must not block
+  // `drop`: that would deadlock `new` and `drop` against each other, and
+  // make `grove drop` unusable on any repository that legitimately
+  // symlinks a carried path (e.g. an `.env` into a shared secrets
+  // directory). Every refusal that does apply is still collected and
+  // reported together, and drop stops before touching anything.
   const repoDir = mainWorktree({ cwd }).path;
   const carriedFiles = [...config.carryFiles];
   const carriedDirs = [...config.carryDirs];
 
-  function classify(paths, baseDir, side) {
-    const present = [];
+  function classify(paths) {
+    const worktreePresent = [];
+    const repoPresent = [];
     const refused = [];
     for (const path of paths) {
-      const state = carryPathState(join(baseDir, path));
-      if (state === 'symlink') refused.push(`${path} (a symlink in ${side}; refused rather than followed)`);
-      else if (state === 'present') present.push(path);
+      const worktreeState = carryPathState(join(entry.path, path));
+      const repoState = carryPathState(join(repoDir, path));
+
+      if (worktreeState === 'present') worktreePresent.push(path);
+      if (repoState === 'present') repoPresent.push(path);
+
+      if (worktreeState === 'symlink' && repoState !== 'present') {
+        refused.push(`${path} (a symlink in ${entry.path}; refused rather than followed)`);
+      }
+      if (repoState === 'symlink' && worktreeState === 'present') {
+        refused.push(`${path} (a symlink in ${repoDir}; refused rather than followed)`);
+      }
     }
-    return { present, refused };
+    return { worktreePresent, repoPresent, refused };
   }
 
-  const worktreeFiles = classify(carriedFiles, entry.path, entry.path);
-  const repoFilesSeen = classify(carriedFiles, repoDir, repoDir);
-  const worktreeDirs = classify(carriedDirs, entry.path, entry.path);
-  const repoDirsSeen = classify(carriedDirs, repoDir, repoDir);
+  const files = classify(carriedFiles);
+  const dirs = classify(carriedDirs);
 
-  const refusedCarry = [
-    ...worktreeFiles.refused,
-    ...repoFilesSeen.refused,
-    ...worktreeDirs.refused,
-    ...repoDirsSeen.refused,
-  ];
+  const refusedCarry = [...files.refused, ...dirs.refused];
   if (refusedCarry.length > 0) {
     throw new GroveError(
       `not removing ${entry.path} — refused to inspect carried path(s):\n` +
@@ -90,8 +104,8 @@ export function commandDrop(argument, { cwd = process.cwd(), config }) {
     );
   }
 
-  const rescueFiles = rescuableFiles({ inWorktree: worktreeFiles.present, inRepo: repoFilesSeen.present });
-  const rescueDirs = rescuableFiles({ inWorktree: worktreeDirs.present, inRepo: repoDirsSeen.present });
+  const rescueFiles = rescuableFiles({ inWorktree: files.worktreePresent, inRepo: files.repoPresent });
+  const rescueDirs = rescuableFiles({ inWorktree: dirs.worktreePresent, inRepo: dirs.repoPresent });
 
   if (rescueFiles.length > 0 || rescueDirs.length > 0) {
     console.log(`\n→ rescuing files held only here, into ${repoDir}`);

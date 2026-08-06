@@ -6,10 +6,9 @@
  * workflow and ruleset checks; the shape — collect findings, return them all,
  * exit non-zero if any — is set here.
  */
-import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { mainWorktree, worktrees } from '../git.mjs';
+import { carryPathState, mainWorktree, worktrees } from '../git.mjs';
 import { driftNote } from '../decisions.mjs';
 
 export function commandDoctor({ cwd = process.cwd(), config }) {
@@ -18,14 +17,20 @@ export function commandDoctor({ cwd = process.cwd(), config }) {
 
   // A declared file that is not in the main worktree cannot be carried, and
   // that failure surfaces later, inside a worktree, as a missing variable.
-  for (const file of config.carryFiles) {
-    if (!existsSync(join(repoDir, file))) {
-      findings.push(`carryFiles lists "${file}", which is not in ${repoDir}`);
-    }
-  }
-  for (const dir of config.carryDirs) {
-    if (!existsSync(join(repoDir, dir))) {
-      findings.push(`carryDirs lists "${dir}", which is not in ${repoDir}`);
+  // carryPathState (lstat) is used rather than existsSync, so a symlink is
+  // named as what it is rather than following it — existsSync would follow
+  // a dangling symlink to nothing and report it as simply "not in
+  // <repoDir>", hiding the reason `new`/`drop` refuse it.
+  for (const [label, list] of [['carryFiles', config.carryFiles], ['carryDirs', config.carryDirs]]) {
+    for (const path of list) {
+      const state = carryPathState(join(repoDir, path));
+      if (state === 'missing') {
+        findings.push(`${label} lists "${path}", which is not in ${repoDir}`);
+      } else if (state === 'symlink') {
+        findings.push(
+          `${label} lists "${path}", which is a symlink in ${repoDir} — grove refuses to follow it`,
+        );
+      }
     }
   }
 
