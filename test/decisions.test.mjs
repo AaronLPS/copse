@@ -135,3 +135,13 @@ test('a detached worktree is not reported as drift', () => {
   const entry = { path: '/ws/proj-thing', branch: null, detached: true, isMain: false };
   assert.equal(driftNote(entry, config, { repoDir: '/ws/proj' }), null);
 });
+
+test('a bare main worktree is not reported as drift', () => {
+  // `git worktree list --porcelain` gives a bare main repository no branch
+  // at all (see git.mjs's worktrees()), so entry.branch is null forever —
+  // null !== config.baseBranch forever — and this used to report permanent
+  // drift ("should be on devel") for a layout (bare clone + worktrees) that
+  // was never actually wrong.
+  const entry = { path: '/ws/proj.git', branch: null, detached: false, isMain: true, bare: true };
+  assert.equal(driftNote(entry, config, { repoDir: '/ws/proj.git' }), null);
+});

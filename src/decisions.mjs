@@ -103,13 +103,20 @@ export function pullRequestLookupBranch(entry) {
  * Why this worktree's directory name no longer says what is checked out in it,
  * or `null` when it does.
  *
- * @param {{ path: string, branch: string | null, detached: boolean, isMain: boolean }} entry
+ * @param {{ path: string, branch: string | null, detached: boolean, isMain: boolean, bare?: boolean }} entry
  * @param {{ branchPrefixes: string[], baseBranch: string }} config
  * @param {{ repoDir: string }} options
  * @returns {string | null}
  */
 export function driftNote(entry, config, { repoDir }) {
   if (entry.detached) return null;
+
+  // A bare main repository has no branch checked out at all — `bare: true`
+  // is not "on the wrong branch", it is "no working tree here to be on a
+  // branch in". Without this, entry.branch is null forever, null !==
+  // config.baseBranch forever, and this reported permanent drift for a
+  // layout (bare clone + worktrees) that was never wrong.
+  if (entry.isMain && entry.bare) return null;
 
   if (entry.isMain) {
     // The main worktree owns .git, so a feature branch here is the one branch

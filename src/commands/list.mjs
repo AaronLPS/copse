@@ -19,7 +19,10 @@ export function commandList({ cwd = process.cwd(), config }) {
 
   console.log('');
   for (const entry of entries) {
-    const branch = entry.detached ? '(detached)' : entry.branch;
+    // entry.branch is null for a bare main repository too (see git.mjs's
+    // worktrees()), and null is not '(detached)' — print it as what it is
+    // rather than falling through to the literal string "null".
+    const branch = entry.bare ? '(bare)' : entry.detached ? '(detached)' : entry.branch;
 
     const note = driftNote(entry, config, { repoDir });
     if (note !== null) drifted += 1;
@@ -37,7 +40,13 @@ export function commandList({ cwd = process.cwd(), config }) {
       pullRequestNote(pr, { isMain: entry.isMain }),
     ].filter(Boolean);
 
-    const shown = note ?? (entry.isMain ? `main worktree, pinned to ${config.baseBranch}` : '');
+    const shown =
+      note ??
+      (entry.isMain
+        ? entry.bare
+          ? 'bare repository — no working tree here'
+          : `main worktree, pinned to ${config.baseBranch}`
+        : '');
     console.log(`  ${relative(parent, entry.path).padEnd(38)} ${String(branch).padEnd(34)} ${shown}`);
     if (flags.length) console.log(`  ${''.padEnd(38)} ${flags.join(', ')}`);
   }

@@ -25,7 +25,9 @@ import { parseConfig } from '../src/config.mjs';
 import { commandDoctor } from '../src/commands/doctor.mjs';
 import { commandDrop } from '../src/commands/drop.mjs';
 import { commandList } from '../src/commands/list.mjs';
-import { commandNew } from '../src/commands/new.mjs';
+import { commandNew, GroveError } from '../src/commands/new.mjs';
+import { driftNote } from '../src/decisions.mjs';
+import { worktrees } from '../src/git.mjs';
 
 /**
  * commandList/commandDoctor print to stdout as part of their contract; that
@@ -445,6 +447,198 @@ test('drop refuses to rescue through a symlinked carry path in the repo, and lea
   }
 });
 
+const nestedConfig = parseConfig({
+  baseBranch: 'devel',
+  carryFiles: ['cfg/.env.test'],
+  install: null,
+}).config;
+
+const nestedDirConfig = parseConfig({
+  baseBranch: 'devel',
+  carryDirs: ['data/cache'],
+  install: null,
+}).config;
+
+test('new refuses to copy through a symlinked intermediate directory (source side)', () => {
+  // The gap carryPathState leaves on purpose: it lstats only the carried
+  // path's final component. lstat on `cfg/.env.test` resolves `cfg` (the
+  // intermediate) transparently, so a `cfg -> outside` symlink makes the
+  // read land on whatever `outside/.env.test` is — reported as "present" or
+  // "missing" as if `cfg` were an ordinary directory, never as a symlink.
+  const { root, repo } = makeRepo();
+  try {
+    const outside = join(root, 'outside-source-dir');
+    mkdirSync(outside);
+    writeFileSync(join(outside, '.env.test'), 'PAYLOAD\n');
+    symlinkSync(outside, join(repo, 'cfg'));
+
+    assert.throws(
+      () => commandNew('feat/x', { cwd: repo, config: nestedConfig }),
+      (error) =>
+        error instanceof GroveError &&
+        /cfg\/\.env\.test/.test(error.message) &&
+        /"cfg"/.test(error.message) &&
+        /resolves outside/.test(error.message),
+    );
+
+    const target = join(root, 'proj-feat-x');
+    assert.ok(existsSync(target), 'the half-built worktree from worktree add is left in place');
+    assert.ok(
+      !existsSync(join(target, 'cfg', '.env.test')),
+      'nothing was written through the symlinked intermediate directory',
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('new refuses to write through a symlink already checked out at the destination carry path', () => {
+  // The destination side of the carry that commandNew never checked at all:
+  // a symlink can be committed on the branch itself at the carried path, so
+  // it is already sitting at the destination the instant `git worktree add`
+  // finishes — before grove's own copy step ever runs. Source and
+  // destination are made to diverge on purpose: the commit (what the new
+  // worktree checks out from origin/devel) holds the symlink, while the
+  // repo's own working copy — grove's copy *source* — is a real file, so
+  // this exercises the destination check specifically rather than the
+  // source-side one already covered above.
+  const { root, repo } = makeRepo();
+  try {
+    const outsideVictim = join(root, 'outside-victim');
+    writeFileSync(outsideVictim, 'original\n');
+
+    mkdirSync(join(repo, 'cfg'));
+    symlinkSync(outsideVictim, join(repo, 'cfg', '.env.test'));
+    // .gitignore has a bare `.env.test`, which git matches at any depth —
+    // `git add -A` alone would skip this nested one as ignored. `-f` forces
+    // it in, deliberately: the point of this test is a symlink git *did*
+    // commit at the carried path, ignore rules notwithstanding.
+    run('git', ['add', '-f', 'cfg/.env.test'], repo);
+    run('git', ['commit', '-m', 'commit a symlink at the carried path'], repo);
+    run('git', ['push', 'origin', 'devel'], repo);
+
+    // The repo's local working copy now diverges from what devel actually
+    // holds: a real file sits where the commit — and so the freshly
+    // checked-out worktree — has a symlink.
+    rmSync(join(repo, 'cfg', '.env.test'));
+    writeFileSync(join(repo, 'cfg', '.env.test'), 'PAYLOAD\n');
+
+    assert.throws(
+      () => commandNew('feat/x', { cwd: repo, config: nestedConfig }),
+      (error) =>
+        error instanceof GroveError &&
+        /cfg\/\.env\.test/.test(error.message) &&
+        /symlink already checked out/.test(error.message),
+    );
+
+    assert.equal(
+      readFileSync(outsideVictim, 'utf8'),
+      'original\n',
+      'nothing was written through the destination symlink',
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('new refuses to copy through a symlinked intermediate directory — carryDirs variant', () => {
+  // carryDirs entry is 'data/cache'; the symlink sits at 'data' — one level
+  // above the carried directory itself — so this exercises the intermediate
+  // ancestor check, not the leaf check (a symlinked 'data/cache' itself
+  // would just be an ordinary leaf-symlink refusal, already covered).
+  const { root, repo } = makeRepo();
+  try {
+    const outside = join(root, 'outside-data-dir');
+    mkdirSync(outside);
+    mkdirSync(join(outside, 'cache'));
+    writeFileSync(join(outside, 'cache', 'note.txt'), 'PAYLOAD\n');
+    symlinkSync(outside, join(repo, 'data'));
+
+    assert.throws(
+      () => commandNew('feat/x', { cwd: repo, config: nestedDirConfig }),
+      (error) =>
+        error instanceof GroveError &&
+        /data\/cache/.test(error.message) &&
+        /"data"/.test(error.message) &&
+        /resolves outside/.test(error.message),
+    );
+
+    const target = join(root, 'proj-feat-x');
+    assert.ok(
+      !existsSync(join(target, 'data', 'cache', 'note.txt')),
+      'nothing was written through the symlinked carryDirs entry',
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('drop refuses to rescue through a symlinked intermediate directory in the repo', () => {
+  // The exact transcript this closes: repo/cfg is a symlink to somewhere
+  // outside the repo; the worktree holds a real cfg/.env.test. lstat on the
+  // repo-side carried path resolves through the symlinked `cfg` and reports
+  // "missing" (nothing at outside/.env.test), so the old code treated the
+  // file as rescuable and copyFileSync wrote it straight through the link.
+  const { root, repo } = makeRepo();
+  try {
+    commandNew('feat/x', { cwd: repo, config: nestedConfig });
+    const target = join(root, 'proj-feat-x');
+
+    const outside = join(root, 'outside-rescue-dir');
+    mkdirSync(outside);
+    rmSync(join(repo, 'cfg'), { recursive: true, force: true });
+    symlinkSync(outside, join(repo, 'cfg'));
+    mkdirSync(join(target, 'cfg'), { recursive: true });
+    writeFileSync(join(target, 'cfg', '.env.test'), 'PAYLOAD\n');
+
+    assert.throws(
+      () => commandDrop('feat/x', { cwd: repo, config: nestedConfig }),
+      (error) => /cfg\/\.env\.test/.test(error.message) && /resolves outside/.test(error.message),
+    );
+
+    assert.ok(!existsSync(join(outside, '.env.test')), 'nothing was written through the symlink');
+    assert.ok(existsSync(target), 'the worktree survived the refusal — nothing was lost');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a repo-side symlinked intermediate directory that new refused to copy through does not deadlock drop', () => {
+  // Mirrors the leaf-symlink deadlock regression test below, for the
+  // intermediate-directory case: `new` refuses to copy through repo/cfg (a
+  // symlink), so the worktree never gets a cfg/.env.test to rescue. `drop`
+  // must still succeed — refusing because the same symlink is visible from
+  // drop's side too would deadlock the two commands against each other.
+  const { root, repo } = makeRepo();
+  try {
+    const outside = join(root, 'outside-deadlock-dir');
+    mkdirSync(outside);
+    writeFileSync(join(outside, '.env.test'), 'PAYLOAD\n');
+    symlinkSync(outside, join(repo, 'cfg'));
+
+    assert.throws(
+      () => commandNew('feat/x', { cwd: repo, config: nestedConfig }),
+      (error) => /cfg\/\.env\.test/.test(error.message) && /resolves outside/.test(error.message),
+    );
+
+    const target = join(root, 'proj-feat-x');
+    assert.ok(existsSync(target), 'the half-built worktree from worktree add is left in place');
+    assert.ok(!existsSync(join(target, 'cfg')), 'the copy never happened — nothing to rescue');
+
+    // Before the containment fix mirrored the deadlock fix, this refused too.
+    commandDrop('feat/x', { cwd: repo, config: nestedConfig });
+
+    assert.ok(!existsSync(target), 'drop succeeded — the worktree was removed');
+    assert.equal(
+      readFileSync(join(outside, '.env.test'), 'utf8'),
+      'PAYLOAD\n',
+      'the symlink target was never touched',
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('a repo-side symlinked carry path that new refused to copy does not deadlock drop', () => {
   // The regression this guards: `new`'s refusal to copy through a repo-side
   // symlink left the worktree without a copy of the carried path at all —
@@ -477,6 +671,80 @@ test('a repo-side symlinked carry path that new refused to copy does not deadloc
 
     assert.ok(!existsSync(target), 'drop succeeded — the worktree was removed');
     assert.equal(readFileSync(outside, 'utf8'), 'PAYLOAD\n', 'the symlink target was never touched');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+/**
+ * A bare main repository, with an ordinary worktree already attached — the
+ * "clone --bare, then `git worktree add` onto it" layout the bug report
+ * names as popular with this tool's audience. `git worktree list
+ * --porcelain` reports the bare repository itself as the main worktree,
+ * with a `bare` line instead of a `branch`/`detached` one.
+ */
+function makeBareRepo() {
+  const root = mkdtempSync(join(tmpdir(), 'grove-bare-'));
+  const seed = join(root, 'seed');
+
+  run('git', ['init', '-b', 'devel', seed], root);
+  run('git', ['config', 'user.email', 'test@example.com'], seed);
+  run('git', ['config', 'user.name', 'Test'], seed);
+  writeFileSync(join(seed, 'README.md'), '# proj\n');
+  run('git', ['add', '-A'], seed);
+  run('git', ['commit', '-m', 'first'], seed);
+
+  const bareDir = join(root, 'proj.git');
+  run('git', ['clone', '--bare', seed, bareDir], root);
+  const workDir = join(root, 'proj-work');
+  run('git', ['worktree', 'add', workDir, 'devel'], bareDir);
+  rmSync(seed, { recursive: true, force: true });
+
+  return { root, bareDir, workDir };
+}
+
+test('worktrees() reports a bare main repository as bare, not as branch: null', () => {
+  const { root, bareDir } = makeBareRepo();
+  try {
+    const entries = worktrees({ cwd: bareDir });
+    const main = entries.find((entry) => entry.isMain);
+    assert.equal(main.bare, true);
+    assert.equal(main.path, bareDir);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('driftNote does not report a real bare main repository as permanent drift', () => {
+  // The attached worktree in this layout is on 'devel' — the base branch,
+  // not a feat/fix/docs/chore-shaped name — so it drifts in its own right
+  // (no recognised prefix) regardless of this fix; that is real and
+  // unrelated to the bare-repository bug, so it is not asserted on here.
+  // What this guards is specifically the main entry, which used to read
+  // "should be on devel" forever because entry.branch was null and null is
+  // never equal to config.baseBranch.
+  const { root, bareDir } = makeBareRepo();
+  try {
+    const entries = worktrees({ cwd: bareDir });
+    const main = entries.find((entry) => entry.isMain);
+    assert.equal(driftNote(main, config, { repoDir: bareDir }), null);
+
+    // commandList must still run cleanly end to end against this layout —
+    // print 'null' as a branch name being one of the concrete symptoms
+    // named in the bug report.
+    withSilencedStdout(() => commandList({ cwd: bareDir, config }));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('new refuses against a bare main repository rather than deriving a broken directory name', () => {
+  const { root, bareDir } = makeBareRepo();
+  try {
+    assert.throws(
+      () => commandNew('feat/x', { cwd: bareDir, config }),
+      (error) => error instanceof GroveError && /bare/.test(error.message),
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
