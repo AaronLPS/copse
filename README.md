@@ -289,9 +289,9 @@ Two things narrow that boundary rather than widen it:
 
 Every user-facing failure normally prints a one-line refusal and exits 1.
 Set `GROVE_DEBUG=1` to get the raw exception and stack trace instead — for
-debugging grove's own code, not for everyday use. (`GROVE_DEBUG=0` and an
-unset `GROVE_DEBUG` both mean off; any other value, including empty-looking
-ones, turns it on.)
+debugging grove's own code, not for everyday use. (`GROVE_DEBUG=0`, an
+unset `GROVE_DEBUG`, and an empty `GROVE_DEBUG=` all mean off; any other
+value turns it on.)
 
 ## Not built yet
 
