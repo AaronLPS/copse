@@ -18,6 +18,8 @@ const USAGE = `
   The directory is derived from the branch. Configure in grove.config.json.
 `;
 
+const DEBUG = Boolean(process.env.GROVE_DEBUG);
+
 function die(message) {
   console.error(`\n✗ ${message}\n`);
   process.exit(1);
@@ -33,8 +35,9 @@ if (command === undefined || command === '--help' || command === '-h') {
 let repoDir;
 try {
   repoDir = mainWorktree().path;
-} catch {
-  die('not inside a git repository');
+} catch (error) {
+  if (DEBUG) throw error;
+  die(`not inside a git repository: ${error.message}`);
 }
 
 const loaded = loadConfig(repoDir);
@@ -60,12 +63,18 @@ try {
     case 'doctor': {
       const { ok } = commandDoctor({ config });
       process.exit(ok ? 0 : 1);
+      break;
     }
     default:
       console.log(USAGE);
       process.exit(1);
   }
 } catch (error) {
-  if (error instanceof GroveError) die(error.message);
-  throw error;
+  // Every user-facing failure is rendered through the same die() path, not
+  // just GroveError refusals — otherwise the most likely first-run failures
+  // (no origin remote, offline, install exiting non-zero, git worktree add
+  // refusing) end in a raw V8 stack trace instead of a message. The stack
+  // stays reachable behind GROVE_DEBUG for anyone debugging grove itself.
+  if (DEBUG) throw error;
+  die(error.message);
 }
