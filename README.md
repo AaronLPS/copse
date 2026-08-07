@@ -2,6 +2,11 @@
 
 Many agent sessions, one repository, no collisions.
 
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
+[![node: >=20](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](package.json)
+[![tests: 80 passing](https://img.shields.io/badge/tests-80%20passing-brightgreen)](#testing)
+[![dependencies: 0](https://img.shields.io/badge/dependencies-0-brightgreen)](package.json)
+
 One person, several coding-agent sessions — Claude Code, Codex, or a mix —
 each in its own terminal, each working on its own thing, against the same
 checkout. Left alone, they collide: two sessions editing the same working
@@ -15,18 +20,61 @@ the gitignored files a plain `git worktree add` would silently drop copied
 over. It does not schedule agents, does not decide what they work on, and
 does not merge anything on their behalf — it manages the directories.
 
-This is the first slice of a larger design (see `docs/DESIGN.md`); what
-follows describes only what is actually implemented and tested today.
+This is the first slice of a larger design (see [`docs/DESIGN.md`](docs/DESIGN.md));
+this README describes only what is actually implemented and tested today.
 
-## Install and run
+## Contents
+
+- [See it work](#see-it-work)
+- [Quickstart](#quickstart)
+- [Command reference](#command-reference)
+  - [`copse new`](#copse-new)
+  - [`copse list`](#copse-list)
+  - [`copse drop`](#copse-drop)
+  - [`copse doctor`](#copse-doctor)
+- [`copse.config.json`](#copseconfigjson)
+- [Branch names and directory names](#branch-names-and-directory-names)
+- [Security note](#security-note)
+- [Debugging copse itself](#debugging-copse-itself)
+- [Not built yet](#not-built-yet)
+- [Testing](#testing)
+
+## See it work
+
+The lifecycle a session actually lives through: create a worktree, work in
+it, see it in `copse list` alongside its pull request state, and remove it
+with `copse drop` — which refuses outright while there is anything to lose,
+and only proceeds once that stops being true.
+
+```mermaid
+flowchart TD
+    A["copse new feat/inbox-filter"] --> B["new sibling worktree created off origin/main<br/>ignored files copied over"]
+    B --> C["work happens in the new worktree"]
+    C --> D["copse list"]
+    D --> E["shows proj-feat-inbox-filter on feat/inbox-filter<br/>with its PR state, e.g. &quot;PR #12 merged — droppable&quot;"]
+    E --> F["copse drop feat/inbox-filter"]
+    F --> G{"anything to lose?"}
+    G -->|"dirty working tree, or unpushed commits"| H["refuses: lists every reason at once"]
+    H --> I["fix it: push the commits, or commit/stash the changes"]
+    I --> F
+    G -->|"clean and pushed"| J["rescue files this worktree alone holds"]
+    J --> K["remove the worktree directory"]
+    K --> L["branch feat/inbox-filter left behind on purpose"]
+```
+
+The refusal is not an edge case tacked on for completeness — refusing well
+while there is something to lose is the entire reason `drop` exists instead
+of being a one-line wrapper around `git worktree remove`.
+
+## Quickstart
 
 copse is a zero-dependency `npx` target: `package.json` declares
 `bin: { copse: "./src/cli.mjs" }` and no `dependencies`, so running it never
 pulls in a tree of packages. It requires Node ≥20 (`node:test`, used by the
 test suite, is stable from 20; the CLI itself uses nothing newer).
 
-It has not been published to npm yet, so `npx copse` does not resolve. Until
-it is, run it straight from the repository:
+It has **not** been published to npm yet, so `npx copse` does not resolve.
+Until it is, run it straight from the repository:
 
 ```
 npx github:AaronLPS/copse <command>
@@ -36,7 +84,20 @@ or from a checkout, either as `node /path/to/copse/src/cli.mjs <command>` or
 on `PATH` for the length of a session with `npm link`. Once published, the
 same commands run as `npx copse <command>`.
 
-## Command surface
+A real run, from a throwaway repository:
+
+```
+$ npx github:AaronLPS/copse new feat/inbox-filter
+→ fetching, so origin/main is current
+→ /home/me/ws/proj-feat-inbox-filter  (feat/inbox-filter from origin/main)
+→ copying the files git will not carry
+   ✓ .env.test
+
+✓ /home/me/ws/proj-feat-inbox-filter
+  cd /home/me/ws/proj-feat-inbox-filter
+```
+
+## Command reference
 
 ```
 copse new <prefix>/<lower-kebab>   create a worktree, branch, and carry the ignored files
@@ -46,7 +107,7 @@ copse doctor                       is the carried-file declaration and every wor
 ```
 
 Run `copse` or `copse --help` for the same summary. There is no `init`,
-`land`, `verify`, `protect`, or `hook` yet — see "Not built yet" below.
+`land`, `verify`, `protect`, or `hook` yet — see [Not built yet](#not-built-yet).
 
 ### `copse new`
 
@@ -81,11 +142,11 @@ A real run looks like this (verified against a throwaway repository):
 ```
 
 If a carried path turns out to be a symlink — or passes through one on the
-way — `new` refuses to copy it rather than following it (see the security
-note below), and lists every such refusal together rather than stopping at
-the first. The worktree it already created is left in place, half set up,
-with the fix pointed at: adjust the offending path, then either re-run or
-remove it with `copse drop <branch>`.
+way — `new` refuses to copy it rather than following it (see the [security
+note](#security-note)), and lists every such refusal together rather than
+stopping at the first. The worktree it already created is left in place,
+half set up, with the fix pointed at: adjust the offending path, then either
+re-run or remove it with `copse drop <branch>`.
 
 ### `copse list`
 
@@ -235,8 +296,8 @@ discovered later:
   check can be walked around with a Windows-style separator on a platform
   that still honours it.
 
-`install` is always an array, never a string — see the security note below
-for why that particular detail matters.
+`install` is always an array, never a string — see the [security
+note](#security-note) for why that particular detail matters.
 
 ## Branch names and directory names
 
@@ -249,10 +310,18 @@ The directory a worktree gets is derived from the branch, never chosen: the
 `/` becomes a `-`, and the whole slug is appended as a suffix to the main
 worktree's own directory, as a flat sibling of it — not nested inside it.
 
-```
-repository:  /home/me/ws/proj
-branch:      feat/inbox-filter
-worktree:    /home/me/ws/proj-feat-inbox-filter
+```mermaid
+flowchart LR
+    subgraph WS["/home/me/ws"]
+        direction TB
+        MAIN["proj<br/>(main worktree, holds .git,<br/>on main)"]
+        W1["proj-feat-inbox-filter<br/>(branch feat/inbox-filter)"]
+        W2["proj-fix-null-check<br/>(branch fix/null-check)"]
+    end
+    MAIN -.->|"flat sibling"| W1
+    MAIN -.->|"flat sibling"| W2
+
+    N1["feat/inbox-filter"] -->|"slugFor: / becomes -"| N2["proj-feat-inbox-filter"]
 ```
 
 The prefix is kept in the slug rather than stripped. Stripping it would read
