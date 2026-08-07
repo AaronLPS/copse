@@ -17,6 +17,7 @@ jobs:
     # integration suite shells out to a real git besides. Making this
     # matrix portable to Windows is future work, not an omission.
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
       matrix:
         # 20 is the declared floor (engines.node >= 20). 24 is what the

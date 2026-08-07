@@ -5,7 +5,6 @@ Many agent sessions, one repository, no collisions.
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 [![test](https://github.com/AaronLPS/copse/actions/workflows/test.yml/badge.svg)](https://github.com/AaronLPS/copse/actions/workflows/test.yml)
 [![node: >=20](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](package.json)
-[![tests: 80 passing](https://img.shields.io/badge/tests-80%20passing-brightgreen)](#testing)
 [![dependencies: 0](https://img.shields.io/badge/dependencies-0-brightgreen)](package.json)
 
 One person, several coding-agent sessions — Claude Code, Codex, or a mix —
@@ -39,6 +38,7 @@ this README describes only what is actually implemented and tested today.
 - [Debugging copse itself](#debugging-copse-itself)
 - [Not built yet](#not-built-yet)
 - [Testing](#testing)
+- [More](#more)
 
 ## See it work
 
@@ -52,7 +52,7 @@ flowchart TD
     A["copse new feat/inbox-filter"] --> B["new sibling worktree created off origin/main<br/>ignored files copied over"]
     B --> C["work happens in the new worktree"]
     C --> D["copse list"]
-    D --> E["shows proj-feat-inbox-filter on feat/inbox-filter<br/>with its PR state, e.g. &quot;PR #12 merged — droppable&quot;"]
+    D --> E["shows proj-feat-inbox-filter on feat/inbox-filter<br/>with its PR state, e.g. #quot;PR #12 merged — droppable#quot;"]
     E --> F["copse drop feat/inbox-filter"]
     F --> G{"anything to lose?"}
     G -->|"dirty working tree, or unpushed commits"| H["refuses: lists every reason at once"]
@@ -107,7 +107,7 @@ copse drop <branch>                remove a worktree, refusing while anything wo
 copse doctor                       is the carried-file declaration and every worktree name still true
 ```
 
-Run `copse` or `copse --help` for the same summary. There is no `init`,
+Run `copse` or `copse --help` for a similar summary, in its own words. There is no `init`,
 `land`, `verify`, `protect`, or `hook` yet — see [Not built yet](#not-built-yet).
 
 ### `copse new`
@@ -174,6 +174,8 @@ than reporting them as failed.
                                          PR state unknown
   proj-feat-inbox-filter                 feat/inbox-filter
                                          PR state unknown
+
+✓ every directory name matches its branch
 ```
 
 (Actual output, from a repository with no `gh` reachable in the test
@@ -322,7 +324,8 @@ flowchart LR
     MAIN -.->|"flat sibling"| W1
     MAIN -.->|"flat sibling"| W2
 
-    N1["feat/inbox-filter"] -->|"slugFor: / becomes -"| N2["proj-feat-inbox-filter"]
+    N1["feat/inbox-filter"] -->|"slugFor: / becomes -"| N2["feat-inbox-filter"]
+    N2 -->|"directoryFor: main worktree's dir + slug"| N3["proj-feat-inbox-filter"]
 ```
 
 The prefix is kept in the slug rather than stripped. Stripping it would read
@@ -354,6 +357,11 @@ Two things narrow that boundary rather than widen it:
   directory in that path resolves outside the tree it was aimed at through
   a symlink (even a dangling one). A carried path can therefore never write
   outside the worktree or repository directory it targets.
+
+Those checks cover the carried path itself and its ancestors, not what's
+*inside* a carried directory: a symlink nested inside one is copied as a
+live symlink, pointing wherever it originally pointed. See [`SECURITY.md`'s
+Known limitation](SECURITY.md#known-limitation) for the detail.
 
 ## Debugging copse itself
 
@@ -396,3 +404,12 @@ calls, plus an integration suite that runs the full lifecycle against a
 real temporary git repository (copse's own bugs live in the interaction
 with real git, not in isolated logic). 80 tests, all passing, as of this
 writing.
+
+## More
+
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — how the suite and the architecture
+  rule work, before sending a pull request.
+- [`SECURITY.md`](SECURITY.md) — what copse's trust boundary is and how to
+  report a vulnerability.
+- [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) — the standard this project
+  holds itself to.

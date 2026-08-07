@@ -46,8 +46,14 @@ things it does are worth naming plainly rather than leaving implicit:
   rather than `stat`ing it, so a symlink at the top level of a carried
   path — dangling or not — is refused rather than followed, whether it
   sits in the main worktree (the copy-in side, `copse new`) or was
-  checked out on the branch itself and now sits in the new worktree, or
-  in the rescue direction (`copse drop`).
+  checked out on the branch itself and now sits in the new worktree.
+  On the rescue side (`copse drop`), that same refusal only fires when
+  the path actually participates in the rescue — a symlink neither side
+  would touch during that particular removal does not block `drop`
+  (`src/commands/drop.mjs`); otherwise `new` refusing to copy through a
+  repo-side symlink and `drop` refusing to remove because of that same
+  symlink would deadlock a repository that legitimately symlinks a
+  carried path.
 - **A carried path is refused if any *intermediate* directory in it
   resolves outside the tree through a symlink**, even a dangling one.
   `escapingAncestor` (`src/git.mjs`) walks every directory segment of a
