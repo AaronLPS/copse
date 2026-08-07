@@ -167,9 +167,14 @@ before removing anything; in GoThinking one env file was genuinely in that
 position, present in one worktree and nowhere else, one `git worktree remove`
 from gone.
 
-The list is `config.envFiles`. `doctor` checks that every declared file exists
-in the main worktree, so a stale declaration is reported rather than discovered
-at the moment it matters.
+The list is `config.carryFiles`, with `config.carryDirs` beside it for the
+directory case (`supabase/.temp` and its like), kept separate because copying a
+tree and copying a file fail differently and a single list would have to guess
+which was meant. `doctor` checks that every declared path exists in the main
+worktree, so a stale declaration is reported rather than discovered at the
+moment it matters. A declared path that is a symlink is refused rather than
+followed: copse would otherwise copy through it into somewhere the config never
+named.
 
 ### `copse land` checks, ordered by how hard the mistake is to notice
 
@@ -198,17 +203,35 @@ business; copse only makes "is that server mine?" a question with an answer.
 
 ## Configuration
 
-One file, `copse.config.json`, declaring facts rather than behaviour:
+One file, `copse.config.json`, declaring facts rather than behaviour. What the
+CLI accepts today:
 
 ```json
 {
   "baseBranch": "devel",
-  "releaseBranch": "main",
   "branchPrefixes": ["feat", "fix", "docs", "chore"],
-  "envFiles": [".env.test", "apps/mobile/.env"],
-  "verify": ["pnpm typecheck", "pnpm test"]
+  "carryFiles": [".env.test", "apps/mobile/.env"],
+  "carryDirs": ["supabase/.temp"],
+  "install": ["pnpm", "install"]
 }
 ```
+
+Every key has a default, so a repository with no config file still works. An
+unknown key is an error rather than a shrug — a silently ignored typo looks
+exactly like a setting that does not work. `install` is an array rather than a
+string so the command is never handed to a shell, where an element could be
+read as an operator.
+
+Two further keys are designed but not yet parsed, and are named here so the
+sections that depend on them read straight:
+
+- `releaseBranch` — the other half of a `devel`/`main` split. Only `land` and
+  `protect` need it, and neither exists yet.
+- `verify` — the project's declared check list, as argued below.
+
+They are absent from the parser deliberately, not by oversight: accepting a key
+the CLI does nothing with is worse than rejecting it, because the config would
+then claim a guarantee nothing enforces.
 
 ### Why `verify` lives here and not in the workflow
 
