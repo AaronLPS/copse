@@ -1,4 +1,4 @@
-<h1><img src="assets/logo-lockup.svg" alt="copse" height="40"></h1>
+<h1><img src="assets/logo-lockup.svg" alt="copse" height="80"></h1>
 
 Many agent sessions, one repository, no collisions.
 
