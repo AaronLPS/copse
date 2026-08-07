@@ -1,0 +1,65 @@
+name: Bug report
+description: Something in copse behaved differently from what it documents or promises.
+labels: [bug]
+body:
+  - type: input
+    id: command
+    attributes:
+      label: copse command
+      description: The exact command you ran, e.g. `copse new feat/inbox-filter`.
+      placeholder: copse new feat/inbox-filter
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: >
+        Paste the actual output, including the error message. If it isn't
+        self-explanatory, re-run with `COPSE_DEBUG=1` (e.g.
+        `COPSE_DEBUG=1 copse new feat/inbox-filter`) and paste the stack
+        trace it prints instead.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: copse.config.json
+      description: The relevant part of your `copse.config.json`, if the repository has one.
+      render: json
+
+  - type: input
+    id: node-version
+    attributes:
+      label: Node version
+      description: Output of `node --version`.
+      placeholder: v20.11.0
+    validations:
+      required: true
+
+  - type: input
+    id: git-version
+    attributes:
+      label: git version
+      description: Output of `git --version`.
+      placeholder: git version 2.43.0
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: macOS 14.4, Ubuntu 22.04, etc.
+    validations:
+      required: true

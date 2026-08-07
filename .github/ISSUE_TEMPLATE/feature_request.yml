@@ -1,0 +1,32 @@
+name: Feature request
+description: Propose something copse doesn't do yet.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: >
+        Check [`docs/DESIGN.md`](../../docs/DESIGN.md) and the README's
+        "Not built yet" section first — `init`, `land`, `verify`, `protect`,
+        `hook`, and port diagnosis are already designed but unimplemented,
+        and your request may already be one of them.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you running into?
+      description: Describe the situation this would help with, not just the feature itself.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you'd want copse to do
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you're doing instead today
+      description: A workaround, a different tool, or nothing — helps size how much this matters.

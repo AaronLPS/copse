@@ -3,6 +3,7 @@
 Many agent sessions, one repository, no collisions.
 
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
+[![test](https://github.com/AaronLPS/copse/actions/workflows/test.yml/badge.svg)](https://github.com/AaronLPS/copse/actions/workflows/test.yml)
 [![node: >=20](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](package.json)
 [![tests: 80 passing](https://img.shields.io/badge/tests-80%20passing-brightgreen)](#testing)
 [![dependencies: 0](https://img.shields.io/badge/dependencies-0-brightgreen)](package.json)
