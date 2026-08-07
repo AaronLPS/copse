@@ -25,16 +25,16 @@ copse is a zero-dependency `npx` target: `package.json` declares
 pulls in a tree of packages. It requires Node ≥20 (`node:test`, used by the
 test suite, is stable from 20; the CLI itself uses nothing newer).
 
-The package has not been published yet — see "Decisions left to the owner"
-in the commit that added this file. Until it is, run it from a checkout:
+It has not been published to npm yet, so `npx copse` does not resolve. Until
+it is, run it straight from the repository:
 
 ```
-node /path/to/copse/src/cli.mjs <command>
+npx github:AaronLPS/copse <command>
 ```
 
-or put it on `PATH` for the length of a session with `npm link` from the
-copse checkout. Once published under a real name, the same commands run as
-`npx <package-name> <command>`.
+or from a checkout, either as `node /path/to/copse/src/cli.mjs <command>` or
+on `PATH` for the length of a session with `npm link`. Once published, the
+same commands run as `npx copse <command>`.
 
 ## Command surface
 

@@ -6,6 +6,9 @@
   "type": "module",
   "engines": { "node": ">=20" },
   "bin": { "copse": "./src/cli.mjs" },
+  "repository": { "type": "git", "url": "git+https://github.com/AaronLPS/copse.git" },
+  "bugs": { "url": "https://github.com/AaronLPS/copse/issues" },
+  "homepage": "https://github.com/AaronLPS/copse#readme",
   "files": ["src"],
   "scripts": {
     "test": "node --test test/*.mjs"
