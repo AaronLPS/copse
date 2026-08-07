@@ -1,15 +1,32 @@
 {
   "name": "copse",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Many agent sessions, one repository, no collisions.",
-  "keywords": ["git", "worktree", "cli", "agent", "multi-agent"],
+  "keywords": [
+    "git",
+    "worktree",
+    "cli",
+    "agent",
+    "multi-agent"
+  ],
   "type": "module",
-  "engines": { "node": ">=20" },
-  "bin": { "copse": "./src/cli.mjs" },
-  "repository": { "type": "git", "url": "git+https://github.com/AaronLPS/copse.git" },
-  "bugs": { "url": "https://github.com/AaronLPS/copse/issues" },
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "copse": "./src/cli.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AaronLPS/copse.git"
+  },
+  "bugs": {
+    "url": "https://github.com/AaronLPS/copse/issues"
+  },
   "homepage": "https://github.com/AaronLPS/copse#readme",
-  "files": ["src"],
+  "files": [
+    "src"
+  ],
   "scripts": {
     "test": "node --test test/*.mjs"
   },
