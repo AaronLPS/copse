@@ -16,10 +16,10 @@ import {
 } from '../git.mjs';
 import { removalBlockers, rescuableFiles } from '../decisions.mjs';
 import { branchForSlug, parseBranchName } from '../naming.mjs';
-import { GroveError } from './new.mjs';
+import { CopseError } from './new.mjs';
 
 export function commandDrop(argument, { cwd = process.cwd(), config }) {
-  if (!argument) throw new GroveError('usage: grove drop <branch>');
+  if (!argument) throw new CopseError('usage: copse drop <branch>');
 
   // Accept either form: the branch, or the directory slug it produced.
   let branch = argument;
@@ -27,12 +27,12 @@ export function commandDrop(argument, { cwd = process.cwd(), config }) {
     try {
       branch = branchForSlug(argument, config);
     } catch {
-      throw new GroveError(parseBranchName(argument, config).reason);
+      throw new CopseError(parseBranchName(argument, config).reason);
     }
   }
 
   const entry = worktrees({ cwd }).find((w) => w.branch === branch);
-  if (!entry) throw new GroveError(`no worktree has ${branch} checked out`);
+  if (!entry) throw new CopseError(`no worktree has ${branch} checked out`);
 
   const { dirty, unpushed } = worktreeState(entry.path);
   // A `startsWith` on raw paths treats `<repo>-feat-x2` as inside `<repo>-feat-x`
@@ -44,7 +44,7 @@ export function commandDrop(argument, { cwd = process.cwd(), config }) {
 
   const blockers = removalBlockers({ dirty, unpushed, isMain: entry.isMain, isCurrent });
   if (blockers.length > 0) {
-    throw new GroveError(
+    throw new CopseError(
       `not removing ${entry.path}:\n${blockers.map((b) => `  · ${b}`).join('\n')}`,
     );
   }
@@ -77,10 +77,10 @@ export function commandDrop(argument, { cwd = process.cwd(), config }) {
   //     repo-side link and write to whatever it points at, including
   //     outside the repository.
   // A path that would never be touched by the rescue at all — e.g. the
-  // worktree never carried it in the first place, because `grove new`
+  // worktree never carried it in the first place, because `copse new`
   // itself refused to copy through a repo-side symlink — must not block
   // `drop`: that would deadlock `new` and `drop` against each other, and
-  // make `grove drop` unusable on any repository that legitimately
+  // make `copse drop` unusable on any repository that legitimately
   // symlinks a carried path (e.g. an `.env` into a shared secrets
   // directory). Every refusal that does apply is still collected and
   // reported together, and drop stops before touching anything.
@@ -122,7 +122,7 @@ export function commandDrop(argument, { cwd = process.cwd(), config }) {
 
   const refusedCarry = [...files.refused, ...dirs.refused];
   if (refusedCarry.length > 0) {
-    throw new GroveError(
+    throw new CopseError(
       `not removing ${entry.path} — refused to inspect carried path(s):\n` +
         refusedCarry.map((r) => `  · ${r}`).join('\n') +
         '\nResolve the symlink(s) above (replace with a real file or directory), then retry.',

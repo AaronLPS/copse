@@ -21,13 +21,13 @@ import {
 } from '../git.mjs';
 import { directoryFor, parseBranchName } from '../naming.mjs';
 
-export class GroveError extends Error {}
+export class CopseError extends Error {}
 
 export function commandNew(branch, { cwd = process.cwd(), config }) {
-  if (!branch) throw new GroveError('usage: grove new <prefix>/<lower-kebab>');
+  if (!branch) throw new CopseError('usage: copse new <prefix>/<lower-kebab>');
 
   const parsed = parseBranchName(branch, config);
-  if (!parsed.ok) throw new GroveError(parsed.reason);
+  if (!parsed.ok) throw new CopseError(parsed.reason);
 
   const main = mainWorktree({ cwd });
   if (main.bare) {
@@ -39,18 +39,18 @@ export function commandNew(branch, { cwd = process.cwd(), config }) {
     // is a real design question for a later plan, not a one-line fix — so
     // this refuses cleanly instead of producing a worktree nobody would
     // recognise.
-    throw new GroveError(
-      `${main.path} is a bare repository; grove new does not yet support creating worktrees ` +
+    throw new CopseError(
+      `${main.path} is a bare repository; copse new does not yet support creating worktrees ` +
         'against a bare main repository',
     );
   }
   const repoDir = main.path;
   const target = directoryFor(branch, config, { repoDir });
 
-  if (existsSync(target)) throw new GroveError(`${target} already exists`);
+  if (existsSync(target)) throw new CopseError(`${target} already exists`);
 
   const existing = worktrees({ cwd }).find((entry) => entry.branch === branch);
-  if (existing) throw new GroveError(`${branch} is already checked out at ${existing.path}`);
+  if (existing) throw new CopseError(`${branch} is already checked out at ${existing.path}`);
 
   const base = `origin/${config.baseBranch}`;
   console.log(`\n→ fetching, so ${base} is current`);
@@ -132,10 +132,10 @@ export function commandNew(branch, { cwd = process.cwd(), config }) {
   // to remove it, rather than leaving the caller to work that out from a
   // bare error.
   if (refused.length > 0) {
-    throw new GroveError(
+    throw new CopseError(
       `${target} exists but is only partly set up — refused to copy:\n` +
         refused.map((r) => `  · ${r}`).join('\n') +
-        `\nFix the carried path(s) above, then remove this worktree with: grove drop ${branch}`,
+        `\nFix the carried path(s) above, then remove this worktree with: copse drop ${branch}`,
     );
   }
 
@@ -144,9 +144,9 @@ export function commandNew(branch, { cwd = process.cwd(), config }) {
     try {
       execFileSync(config.install[0], config.install.slice(1), { cwd: target, stdio: 'inherit' });
     } catch (error) {
-      throw new GroveError(
+      throw new CopseError(
         `${target} exists but ${config.install.join(' ')} failed:\n${error.message}\n` +
-          `Fix the problem and re-run it there, or remove the worktree with: grove drop ${branch}`,
+          `Fix the problem and re-run it there, or remove the worktree with: copse drop ${branch}`,
       );
     }
   }

@@ -1,4 +1,4 @@
-# grove
+# copse
 
 Many agent sessions, one repository, no collisions.
 
@@ -10,7 +10,7 @@ add` builds and then fails at runtime on a missing `.env`, because
 `git worktree add` cannot carry a gitignored file and the failure looks like
 a code problem instead of a missing setup step.
 
-grove gives each session its own git worktree, named after its branch, with
+copse gives each session its own git worktree, named after its branch, with
 the gitignored files a plain `git worktree add` would silently drop copied
 over. It does not schedule agents, does not decide what they work on, and
 does not merge anything on their behalf — it manages the directories.
@@ -20,8 +20,8 @@ follows describes only what is actually implemented and tested today.
 
 ## Install and run
 
-grove is a zero-dependency `npx` target: `package.json` declares
-`bin: { grove: "./src/cli.mjs" }` and no `dependencies`, so running it never
+copse is a zero-dependency `npx` target: `package.json` declares
+`bin: { copse: "./src/cli.mjs" }` and no `dependencies`, so running it never
 pulls in a tree of packages. It requires Node ≥20 (`node:test`, used by the
 test suite, is stable from 20; the CLI itself uses nothing newer).
 
@@ -29,29 +29,29 @@ The package has not been published yet — see "Decisions left to the owner"
 in the commit that added this file. Until it is, run it from a checkout:
 
 ```
-node /path/to/grove/src/cli.mjs <command>
+node /path/to/copse/src/cli.mjs <command>
 ```
 
 or put it on `PATH` for the length of a session with `npm link` from the
-grove checkout. Once published under a real name, the same commands run as
+copse checkout. Once published under a real name, the same commands run as
 `npx <package-name> <command>`.
 
 ## Command surface
 
 ```
-grove new <prefix>/<lower-kebab>   create a worktree, branch, and carry the ignored files
-grove list                         every worktree, and whether its directory name still fits
-grove drop <branch>                remove a worktree, refusing while anything would be lost
-grove doctor                       is the carried-file declaration and every worktree name still true
+copse new <prefix>/<lower-kebab>   create a worktree, branch, and carry the ignored files
+copse list                         every worktree, and whether its directory name still fits
+copse drop <branch>                remove a worktree, refusing while anything would be lost
+copse doctor                       is the carried-file declaration and every worktree name still true
 ```
 
-Run `grove` or `grove --help` for the same summary. There is no `init`,
+Run `copse` or `copse --help` for the same summary. There is no `init`,
 `land`, `verify`, `protect`, or `hook` yet — see "Not built yet" below.
 
-### `grove new`
+### `copse new`
 
 ```
-grove new feat/inbox-filter
+copse new feat/inbox-filter
 ```
 
 Validates the branch name against the shape below, then:
@@ -85,9 +85,9 @@ way — `new` refuses to copy it rather than following it (see the security
 note below), and lists every such refusal together rather than stopping at
 the first. The worktree it already created is left in place, half set up,
 with the fix pointed at: adjust the offending path, then either re-run or
-remove it with `grove drop <branch>`.
+remove it with `copse drop <branch>`.
 
-### `grove list`
+### `copse list`
 
 Prints every worktree of the repository, its branch, and:
 
@@ -117,11 +117,11 @@ than reporting them as failed.
 (Actual output, from a repository with no `gh` reachable in the test
 environment.)
 
-### `grove drop`
+### `copse drop`
 
 ```
-grove drop feat/inbox-filter
-grove drop feat-inbox-filter   # the directory slug works too
+copse drop feat/inbox-filter
+copse drop feat-inbox-filter   # the directory slug works too
 ```
 
 **The refusals are the point of this command.** `drop` will not remove a
@@ -144,7 +144,7 @@ Every applicable reason is reported at once:
 
 Once none of that applies, `drop` rescues carried files or directories that
 this worktree holds the only copy of — the entire reason the command
-exists. `git worktree add` cannot carry gitignored files, so `grove new`
+exists. `git worktree add` cannot carry gitignored files, so `copse new`
 copies them in; if a worktree is the only place a carried file still has
 real content (this happened for real, once, with an env file that existed
 in one worktree and nowhere else), a bare `git worktree remove` would
@@ -172,7 +172,7 @@ repo-side symlink and `drop` refusing to remove because of that same
 symlink would deadlock a repository that legitimately symlinks a carried
 path (an `.env` into a shared secrets directory, for instance).
 
-### `grove doctor`
+### `copse doctor`
 
 Checks that:
 
@@ -182,13 +182,13 @@ Checks that:
 - no worktree has drifted, using the same check `list` uses.
 
 ```
-✓ grove: nothing to report
+✓ copse: nothing to report
 ```
 
 Exits 0 when there is nothing to report, 1 otherwise — this is the one
 command whose exit code is meant to be scripted against.
 
-## `grove.config.json`
+## `copse.config.json`
 
 One optional file at the repository root. Every key has a default, so a
 repository with no config file works with `baseBranch: "main"` and no
@@ -228,7 +228,7 @@ discovered later:
   by name.
 - **A carried path is refused if it is absolute, contains a `..` segment,
   contains a backslash, or (checked at copy time, not config-parse time)
-  resolves outside the repository through a symlink.** grove copies these
+  resolves outside the repository through a symlink.** copse copies these
   paths into and out of worktree directories on your behalf; any of those
   four is a way to make that copy land somewhere other than where it looks
   like it lands. The backslash check exists because a `/`-only segment
@@ -266,31 +266,31 @@ recognise.
 ## Security note
 
 `install`, if configured, runs a binary — named by the first element of the
-array — found via `grove.config.json`, a file inside the repository, with
+array — found via `copse.config.json`, a file inside the repository, with
 inherited stdio and no confirmation prompt. That is the same trust boundary
 `npm install`'s lifecycle scripts already sit on: if you would run `git
 worktree add` and then whatever setup script a clone of this repository
-tells you to run, `grove new` running the same command on your behalf adds
+tells you to run, `copse new` running the same command on your behalf adds
 no new exposure. It is worth naming plainly rather than leaving implicit.
 
 Two things narrow that boundary rather than widen it:
 
 - `install` is always an array (`["pnpm", "install"]`), never a string.
-  grove hands it to `execFileSync` element by element — nothing is ever
+  copse hands it to `execFileSync` element by element — nothing is ever
   passed through a shell, so nothing in it can be interpreted as a shell
   operator.
-- grove refuses to follow a symlink on any carried path, on either the
+- copse refuses to follow a symlink on any carried path, on either the
   repository side or the worktree side, and refuses when an *intermediate*
   directory in that path resolves outside the tree it was aimed at through
   a symlink (even a dangling one). A carried path can therefore never write
   outside the worktree or repository directory it targets.
 
-## Debugging grove itself
+## Debugging copse itself
 
 Every user-facing failure normally prints a one-line refusal and exits 1.
-Set `GROVE_DEBUG=1` to get the raw exception and stack trace instead — for
-debugging grove's own code, not for everyday use. (`GROVE_DEBUG=0`, an
-unset `GROVE_DEBUG`, and an empty `GROVE_DEBUG=` all mean off; any other
+Set `COPSE_DEBUG=1` to get the raw exception and stack trace instead — for
+debugging copse's own code, not for everyday use. (`COPSE_DEBUG=0`, an
+unset `COPSE_DEBUG`, and an empty `COPSE_DEBUG=` all mean off; any other
 value turns it on.)
 
 ## Not built yet
@@ -299,16 +299,16 @@ value turns it on.)
 pieces are designed but not implemented, and running the corresponding
 command will just print the usage text, not do the thing:
 
-- `grove init` — reconciling an existing repository against grove's wiring.
-- `grove land` — the unpushed → CI green → merge → offer-cleanup sequence.
-- `grove verify` — running a project's declared checks, the same way
+- `copse init` — reconciling an existing repository against copse's wiring.
+- `copse land` — the unpushed → CI green → merge → offer-cleanup sequence.
+- `copse verify` — running a project's declared checks, the same way
   locally and in CI.
-- `grove protect` — creating a GitHub branch ruleset via the API.
-- `grove hook` — the internal target every generated git/CI/Claude-Code
+- `copse protect` — creating a GitHub branch ruleset via the API.
+- `copse hook` — the internal target every generated git/CI/Claude-Code
   forward would call.
 - Git hooks, a generated CI workflow, and a Claude Code settings block —
-  none of these are written by grove yet.
-- Port diagnosis in `grove list` ("which worktree owns the process on this
+  none of these are written by copse yet.
+- Port diagnosis in `copse list` ("which worktree owns the process on this
   port").
 
 If you're looking for one of these and it isn't here, it's on the roadmap,
@@ -323,6 +323,6 @@ npm test
 runs `node --test test/*.mjs`: pure unit tests for config parsing, the
 branch/slug/directory mapping, and the removal/drift/pull-request judgement
 calls, plus an integration suite that runs the full lifecycle against a
-real temporary git repository (grove's own bugs live in the interaction
+real temporary git repository (copse's own bugs live in the interaction
 with real git, not in isolated logic). 80 tests, all passing, as of this
 writing.

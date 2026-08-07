@@ -9,7 +9,7 @@ import { join, sep } from 'node:path';
 /**
  * `gh` missing or refusing is instant — ENOENT or a non-zero exit come back in
  * milliseconds. A `gh` that is merely slow does not: a captive portal accepts
- * the TCP connection and never answers it, so with no bound `grove list` — the
+ * the TCP connection and never answers it, so with no bound `copse list` — the
  * command people run to find out where they are — hangs forever instead of
  * degrading to "PR state unknown". This runs once per worktree, serially, so
  * the worst case is this bound times the worktree count.
@@ -251,7 +251,7 @@ export function describeEscapingAncestor(relPath, escape, root, insideLabel) {
  * The newest pull request for a branch, or `null` if there is none.
  *
  * Returns `undefined` when `gh` could not answer at all — absent, logged out,
- * offline, or timed out — because `grove list` must keep working without a
+ * offline, or timed out — because `copse list` must keep working without a
  * network and "there is no PR" would be a claim rather than an observation.
  *
  * @param {string} branch

@@ -4,24 +4,24 @@
  */
 import { loadConfig } from './config.mjs';
 import { mainWorktree } from './git.mjs';
-import { GroveError, commandNew } from './commands/new.mjs';
+import { CopseError, commandNew } from './commands/new.mjs';
 import { commandList } from './commands/list.mjs';
 import { commandDrop } from './commands/drop.mjs';
 import { commandDoctor } from './commands/doctor.mjs';
 
 const USAGE = `
-  grove new <prefix>/<lower-kebab>   worktree off the base branch, files carried
-  grove list                         every worktree, and whether its name still fits
-  grove drop <branch>                refuses while there is anything to lose
-  grove doctor                       is grove still wired into this repository
+  copse new <prefix>/<lower-kebab>   worktree off the base branch, files carried
+  copse list                         every worktree, and whether its name still fits
+  copse drop <branch>                refuses while there is anything to lose
+  copse doctor                       is copse still wired into this repository
 
-  The directory is derived from the branch. Configure in grove.config.json.
+  The directory is derived from the branch. Configure in copse.config.json.
 `;
 
-// Boolean(process.env.GROVE_DEBUG) treats the string "0" as truthy — it is
-// a non-empty string like any other — so GROVE_DEBUG=0, meant to mean "off",
+// Boolean(process.env.COPSE_DEBUG) treats the string "0" as truthy — it is
+// a non-empty string like any other — so COPSE_DEBUG=0, meant to mean "off",
 // turned debug mode on. Only unset, empty, and the literal "0" mean off.
-const DEBUG = !['', '0', undefined].includes(process.env.GROVE_DEBUG);
+const DEBUG = !['', '0', undefined].includes(process.env.COPSE_DEBUG);
 
 function die(message) {
   console.error(`\n✗ ${message}\n`);
@@ -45,7 +45,7 @@ try {
 
 const loaded = loadConfig(repoDir);
 if (!loaded.ok) {
-  console.error('\n✗ grove.config.json:');
+  console.error('\n✗ copse.config.json:');
   for (const error of loaded.errors) console.error(`  · ${error}`);
   console.error('');
   process.exit(1);
@@ -74,10 +74,10 @@ try {
   }
 } catch (error) {
   // Every user-facing failure is rendered through the same die() path, not
-  // just GroveError refusals — otherwise the most likely first-run failures
+  // just CopseError refusals — otherwise the most likely first-run failures
   // (no origin remote, offline, install exiting non-zero, git worktree add
   // refusing) end in a raw V8 stack trace instead of a message. The stack
-  // stays reachable behind GROVE_DEBUG for anyone debugging grove itself.
+  // stays reachable behind COPSE_DEBUG for anyone debugging copse itself.
   if (DEBUG) throw error;
   die(error.message);
 }

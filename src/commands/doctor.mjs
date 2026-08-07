@@ -1,5 +1,5 @@
 /**
- * Whether grove is still wired into this repository, and whether what the
+ * Whether copse is still wired into this repository, and whether what the
  * config declares still matches what is on disk.
  *
  * This plan's scope is the worktree layer only. Later plans add the hook,
@@ -28,7 +28,7 @@ export function commandDoctor({ cwd = process.cwd(), config }) {
         findings.push(`${label} lists "${path}", which is not in ${repoDir}`);
       } else if (state === 'symlink') {
         findings.push(
-          `${label} lists "${path}", which is a symlink in ${repoDir} — grove refuses to follow it`,
+          `${label} lists "${path}", which is a symlink in ${repoDir} — copse refuses to follow it`,
         );
       }
     }
@@ -41,7 +41,7 @@ export function commandDoctor({ cwd = process.cwd(), config }) {
 
   console.log('');
   if (findings.length === 0) {
-    console.log('✓ grove: nothing to report\n');
+    console.log('✓ copse: nothing to report\n');
   } else {
     for (const finding of findings) console.log(`  · ${finding}`);
     console.log(`\n✗ ${findings.length} finding(s)\n`);

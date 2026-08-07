@@ -1,4 +1,4 @@
-# grove — design
+# copse — design
 
 *2026-08-06*
 
@@ -11,7 +11,7 @@ commands, the guards that keep the discipline true, and the CI/ruleset wiring
 that catches whatever the local guards cannot.
 
 It is extracted from GoThinking, where every piece below was learned by losing
-time to its absence. GoThinking becomes grove's first consumer, not its host.
+time to its absence. GoThinking becomes copse's first consumer, not its host.
 
 ## The picture it serves
 
@@ -26,7 +26,7 @@ layer is designed for, because none is used.
 
 ## What is in scope, and what is not
 
-grove ships three layers:
+copse ships three layers:
 
 - **Executable** — the CLI: worktree lifecycle, merge entry, state, verify,
   doctor, ruleset setup.
@@ -48,8 +48,8 @@ Explicitly out of scope:
 
 ## Distribution
 
-An npm package with one bin, published scoped (`@<scope>/grove`) so the typed
-command is `grove` regardless of what the unscoped registry name holds.
+An npm package with one bin, published scoped (`@<scope>/copse`) so the typed
+command is `copse` regardless of what the unscoped registry name holds.
 
 Chosen over copy-in templating and over a machine-level binary for one reason:
 **the update path**. An improvement found in the third project has to reach the
@@ -58,17 +58,17 @@ compounding. A template fork breaks that link at install; a machine-level
 binary has nowhere to put two projects that need different versions.
 
 Node is required on the machine. For a non-Node project that is the only cost —
-`npx grove` needs no dependency entry.
+`npx copse` needs no dependency entry.
 
 ### The governing constraint: delegate, never generate
 
-Everything grove writes into a consuming repo is a one-line forward:
+Everything copse writes into a consuming repo is a one-line forward:
 
 ```
-.githooks/pre-commit          exec npx grove hook pre-commit "$@"
-.githooks/pre-push            exec npx grove hook pre-push "$@"
-.github/workflows/ci.yml      <toolchain preamble> + npx grove verify
-.claude/settings.json         npx grove hook claude-<event>
+.githooks/pre-commit          exec npx copse hook pre-commit "$@"
+.githooks/pre-push            exec npx copse hook pre-push "$@"
+.github/workflows/ci.yml      <toolchain preamble> + npx copse verify
+.claude/settings.json         npx copse hook claude-<event>
 ```
 
 This is the answer to the problem every tool of this kind eventually has: the
@@ -79,7 +79,7 @@ inside them. If the generated content is a forward, upstream changes live in
 the package and the written files stay untouched for years — the upgrade
 degrades to a version bump.
 
-Accepting grove means accepting this constraint on its own design.
+Accepting copse means accepting this constraint on its own design.
 
 ## The three enforcement layers
 
@@ -107,7 +107,7 @@ finished with half the work missing — therefore has no mechanism that reaches 
 Codex session. CI cannot see it either: CI checks what the pull request
 contains, not what is still sitting unpushed on a laptop.
 
-grove's answer is `grove land`: not an interception, but a better entry point
+copse's answer is `copse land`: not an interception, but a better entry point
 that projects name in their instruction file. It is a convention, not a
 guarantee, and that is stated rather than hidden. A PATH shim over `gh` was
 considered and declined — it is a machine-level side effect, and it is still
@@ -121,15 +121,15 @@ command that behaves identically for every agent, instead of a Claude-only
 ## Command surface
 
 ```
-grove init      reconcile an existing repo against grove's wiring
-grove doctor    is this still wired up
-grove new       create a worktree, branch, and carry the ignored files
-grove list      every worktree, whether its name still fits, its PR, its ports
-grove drop      remove a worktree, refusing while anything would be lost
-grove land      unpushed → CI green → merge → offer cleanup
-grove verify    run the project's declared checks; same path locally and in CI
-grove protect   create the branch ruleset via the GitHub API
-grove hook      internal: the target of every generated forward
+copse init      reconcile an existing repo against copse's wiring
+copse doctor    is this still wired up
+copse new       create a worktree, branch, and carry the ignored files
+copse list      every worktree, whether its name still fits, its PR, its ports
+copse drop      remove a worktree, refusing while anything would be lost
+copse land      unpushed → CI green → merge → offer cleanup
+copse verify    run the project's declared checks; same path locally and in CI
+copse protect   create the branch ruleset via the GitHub API
+copse hook      internal: the target of every generated forward
 ```
 
 ## Core mechanisms
@@ -171,7 +171,7 @@ The list is `config.envFiles`. `doctor` checks that every declared file exists
 in the main worktree, so a stale declaration is reported rather than discovered
 at the moment it matters.
 
-### `grove land` checks, ordered by how hard the mistake is to notice
+### `copse land` checks, ordered by how hard the mistake is to notice
 
 1. **Unpushed commits** — refuse. This is the one that caused a real incident.
 2. **CI not green** — refuse. The ruleset also blocks this, but a local refusal
@@ -185,20 +185,20 @@ at the moment it matters.
 A follow-up to an open pull request is a commit on that branch, pushed. The
 test is not "is this new work" but "is this a separate thing to review".
 
-This cannot be enforced in code, so `grove list` shows each worktree's pull
+This cannot be enforced in code, so `copse list` shows each worktree's pull
 request and makes the drift visible instead. A cross-cutting rule needs a
 component and a guard, not a paragraph.
 
 ### Ports are diagnosed, never allocated
 
-`grove list` answers "which worktree owns the process on this port", by reading
+`copse list` answers "which worktree owns the process on this port", by reading
 the listening socket's pid and its working directory. It starts nothing and
 binds nothing. Whether a project pins a dev-server port is the project's
-business; grove only makes "is that server mine?" a question with an answer.
+business; copse only makes "is that server mine?" a question with an answer.
 
 ## Configuration
 
-One file, `grove.config.json`, declaring facts rather than behaviour:
+One file, `copse.config.json`, declaring facts rather than behaviour:
 
 ```json
 {
@@ -218,7 +218,7 @@ deleted. The root cause was that the check list lived in YAML and nothing
 watched the YAML.
 
 Moving the list into config removes the failure rather than guarding it:
-deleting a check is now a conspicuous line in a pull request diff. `grove
+deleting a check is now a conspicuous line in a pull request diff. `copse
 verify` runs the same list locally and in CI, which also closes the gap where
 CI is green over something never run locally. Each command is wrapped in a
 `::group::` so the GitHub UI still shows which one failed.
@@ -231,14 +231,14 @@ at all), while **a deleted check fails silently** (everything green, nothing
 examined). The silent half goes into config; the loud half stays in YAML.
 
 A project needing a build matrix should write its own workflow and skip this
-part. grove does not pretend to cover every CI shape.
+part. copse does not pretend to cover every CI shape.
 
 ## `doctor`, and why no downstream test is needed
 
-`grove verify` runs `doctor` first. That single ordering makes every way the
+`copse verify` runs `doctor` first. That single ordering makes every way the
 wiring can go missing fail loudly:
 
-- the package uninstalled → `npx grove verify` fails in CI
+- the package uninstalled → `npx copse verify` fails in CI
 - `.githooks/` deleted, or `core.hooksPath` unset → doctor refuses at step zero
 - the verify step removed from the workflow → the ruleset's required `ci` check
   goes missing and the pull request sits blocked-pending
@@ -255,7 +255,7 @@ reviewable, and shared across worktrees.
 
 ## `init` is reconciliation, not generation
 
-The hard case is an existing repository, not a greenfield one — grove's first
+The hard case is an existing repository, not a greenfield one — copse's first
 user already has an equivalent of everything it ships. So `init` defaults to
 reporting: this file is absent, this file exists with different content, this
 config value cannot be inferred and needs you. `--apply` writes, item by item,
@@ -277,7 +277,7 @@ carried and that `drop` actually refuses when it holds the only copy of one.
 Nearly every bug in a tool of this kind lives in the interaction with real git,
 where unit tests cannot see it.
 
-**Acceptance is not a green suite.** It is GoThinking running on grove with
+**Acceptance is not a green suite.** It is GoThinking running on copse with
 behaviour unchanged: 537 lines of worktree code deleted in favour of the
 dependency, `pnpm wt` reduced to a thin alias, and one real branch → pull
 request → land cycle completed.
@@ -296,6 +296,6 @@ request → land cycle completed.
 
 ## Bootstrapping note
 
-grove cannot dogfood its own conventions before it exists. This document is the
+copse cannot dogfood its own conventions before it exists. This document is the
 first commit on `main`. The `devel`/`main` split, the hooks, and the ruleset
-are applied to grove itself once the CLI can apply them.
+are applied to copse itself once the CLI can apply them.

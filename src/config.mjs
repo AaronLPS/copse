@@ -1,5 +1,5 @@
 /**
- * The project's declaration of facts grove cannot infer.
+ * The project's declaration of facts copse cannot infer.
  *
  * Parsing is separated from reading so every rule below is reachable from a
  * test without a file on disk. The rules are not cosmetic: two of them
@@ -9,7 +9,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-export const CONFIG_FILENAME = 'grove.config.json';
+export const CONFIG_FILENAME = 'copse.config.json';
 
 /**
  * Defaults chosen so a repository with no config file still works.

@@ -2,7 +2,7 @@
  * The mapping between a branch, its worktree's directory name, and back.
  *
  * Pure, and taking the prefix set as a parameter rather than owning it: this
- * module is the reason grove is extractable at all, and a module-level
+ * module is the reason copse is extractable at all, and a module-level
  * constant here is what made its predecessor project-specific.
  *
  * Why the directory name is derived and never chosen. GoThinking spent a week

@@ -38,7 +38,7 @@ test('an empty prefix list is refused', () => {
 });
 
 test('a carried path escaping the repository is refused', () => {
-  // grove copies these paths into and out of worktree directories. A `..`
+  // copse copies these paths into and out of worktree directories. A `..`
   // segment writes outside the tree it was aimed at.
   const result = parseConfig({ carryFiles: ['../../.ssh/id_rsa'] });
   assert.equal(result.ok, false);
@@ -72,8 +72,8 @@ test('install must be a non-empty command array when present', () => {
 test('loadConfig: a missing config file yields the defaults', () => {
   // loadConfig is the only config path the CLI actually uses, and a missing
   // file is the common case — a repository that has not opted into any
-  // grove settings still has to work.
-  const dir = mkdtempSync(join(tmpdir(), 'grove-config-'));
+  // copse settings still has to work.
+  const dir = mkdtempSync(join(tmpdir(), 'copse-config-'));
   try {
     const result = loadConfig(dir);
     assert.equal(result.ok, true);
@@ -84,7 +84,7 @@ test('loadConfig: a missing config file yields the defaults', () => {
 });
 
 test('loadConfig: malformed JSON fails and names the file', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'grove-config-'));
+  const dir = mkdtempSync(join(tmpdir(), 'copse-config-'));
   try {
     writeFileSync(join(dir, CONFIG_FILENAME), '{ not valid json');
     const result = loadConfig(dir);
@@ -96,7 +96,7 @@ test('loadConfig: malformed JSON fails and names the file', () => {
 });
 
 test('loadConfig: a well-formed config file is parsed the same as parseConfig would', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'grove-config-'));
+  const dir = mkdtempSync(join(tmpdir(), 'copse-config-'));
   try {
     writeFileSync(join(dir, CONFIG_FILENAME), JSON.stringify({ baseBranch: 'devel' }));
     const result = loadConfig(dir);

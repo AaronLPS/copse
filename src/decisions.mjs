@@ -58,7 +58,7 @@ export function rescuableFiles({ inWorktree, inRepo }) {
 }
 
 /**
- * How a branch's pull request reads in `grove list`.
+ * How a branch's pull request reads in `copse list`.
  *
  * `null` means asked and there is none; `undefined` means could not ask — `gh`
  * missing, unauthenticated, offline or timed out. They are different facts and

@@ -26,7 +26,7 @@ import { parseConfig } from '../src/config.mjs';
 import { commandDoctor } from '../src/commands/doctor.mjs';
 import { commandDrop } from '../src/commands/drop.mjs';
 import { commandList } from '../src/commands/list.mjs';
-import { commandNew, GroveError } from '../src/commands/new.mjs';
+import { commandNew, CopseError } from '../src/commands/new.mjs';
 import { driftNote } from '../src/decisions.mjs';
 import { worktrees } from '../src/git.mjs';
 
@@ -86,7 +86,7 @@ function run(cmd, args, cwd) {
 
 /** A repository with an `origin` that is a real bare repo on disk. */
 function makeRepo() {
-  const root = mkdtempSync(join(tmpdir(), 'grove-'));
+  const root = mkdtempSync(join(tmpdir(), 'copse-'));
   const remote = join(root, 'origin.git');
   const repo = join(root, 'proj');
 
@@ -135,7 +135,7 @@ test('new refuses a branch whose directory already exists', () => {
 
 test('new refuses a branch already checked out, even with its directory gone', () => {
   // The previous test's assertion only checked the error's *type*
-  // (GroveError), which both refusals throw, so it passed while actually
+  // (CopseError), which both refusals throw, so it passed while actually
   // exercising the existsSync(target) check — the worktrees().find(...)
   // refusal was never reached. Removing the directory but leaving the
   // branch's worktree registration in git (worktree list still reports it,
@@ -411,7 +411,7 @@ test('new refuses to copy through a symlinked carry path, and says why', () => {
   // existsSync follows symlinks, so a dangling one at the repo-side carried
   // path used to read as "not present" — rescued as if absent, and
   // copyFileSync/cpSync would then write or read through the link. The
-  // worktree new already created must survive the refusal (see the "grove
+  // worktree new already created must survive the refusal (see the "copse
   // drop" naming below), rather than being silently left half-provisioned.
   const { root, repo } = makeRepo();
   try {
@@ -422,7 +422,7 @@ test('new refuses to copy through a symlinked carry path, and says why', () => {
 
     assert.throws(
       () => commandNew('feat/x', { cwd: repo, config }),
-      (error) => /\.env\.test/.test(error.message) && /symlink/.test(error.message) && /grove drop feat\/x/.test(error.message),
+      (error) => /\.env\.test/.test(error.message) && /symlink/.test(error.message) && /copse drop feat\/x/.test(error.message),
     );
 
     const target = join(root, 'proj-feat-x');
@@ -489,7 +489,7 @@ test('new refuses to copy through a symlinked intermediate directory (source sid
     assert.throws(
       () => commandNew('feat/x', { cwd: repo, config: nestedConfig }),
       (error) =>
-        error instanceof GroveError &&
+        error instanceof CopseError &&
         /cfg\/\.env\.test/.test(error.message) &&
         /"cfg"/.test(error.message) &&
         /resolves outside/.test(error.message),
@@ -510,10 +510,10 @@ test('new refuses to write through a symlink already checked out at the destinat
   // The destination side of the carry that commandNew never checked at all:
   // a symlink can be committed on the branch itself at the carried path, so
   // it is already sitting at the destination the instant `git worktree add`
-  // finishes — before grove's own copy step ever runs. Source and
+  // finishes — before copse's own copy step ever runs. Source and
   // destination are made to diverge on purpose: the commit (what the new
   // worktree checks out from origin/devel) holds the symlink, while the
-  // repo's own working copy — grove's copy *source* — is a real file, so
+  // repo's own working copy — copse's copy *source* — is a real file, so
   // this exercises the destination check specifically rather than the
   // source-side one already covered above.
   const { root, repo } = makeRepo();
@@ -540,7 +540,7 @@ test('new refuses to write through a symlink already checked out at the destinat
     assert.throws(
       () => commandNew('feat/x', { cwd: repo, config: nestedConfig }),
       (error) =>
-        error instanceof GroveError &&
+        error instanceof CopseError &&
         /cfg\/\.env\.test/.test(error.message) &&
         /symlink already checked out/.test(error.message),
     );
@@ -571,7 +571,7 @@ test('new refuses to copy through a symlinked intermediate directory — carryDi
     assert.throws(
       () => commandNew('feat/x', { cwd: repo, config: nestedDirConfig }),
       (error) =>
-        error instanceof GroveError &&
+        error instanceof CopseError &&
         /data\/cache/.test(error.message) &&
         /"data"/.test(error.message) &&
         /resolves outside/.test(error.message),
@@ -591,7 +591,7 @@ test('new refuses to write through a symlinked intermediate directory already ch
   // Mirrors the source-side intermediate-directory test above, but for the
   // destination: the *commit* on devel — what a freshly created worktree
   // checks out — holds `cfg` as a symlink to somewhere outside the new
-  // worktree, while the repo's own local working copy (grove's copy
+  // worktree, while the repo's own local working copy (copse's copy
   // *source*) is a real directory. That divergence is what forces the code
   // path all the way to the destination ancestor check (new.mjs's
   // destEscape) rather than stopping earlier at the source-side one.
@@ -615,7 +615,7 @@ test('new refuses to write through a symlinked intermediate directory already ch
     assert.throws(
       () => commandNew('feat/x', { cwd: repo, config: nestedConfig }),
       (error) =>
-        error instanceof GroveError &&
+        error instanceof CopseError &&
         /cfg\/\.env\.test/.test(error.message) &&
         /"cfg"/.test(error.message) &&
         /resolves outside/.test(error.message),
@@ -644,7 +644,7 @@ test('new refuses to copy through a dangling symlinked intermediate directory, b
     assert.throws(
       () => commandNew('feat/x', { cwd: repo, config: nestedConfig }),
       (error) =>
-        error instanceof GroveError &&
+        error instanceof CopseError &&
         /cfg\/\.env\.test/.test(error.message) &&
         /"cfg"/.test(error.message) &&
         /does not resolve to anything/.test(error.message),
@@ -659,7 +659,7 @@ test('drop refuses to rescue through a dangling symlinked intermediate directory
   // ancestor read as "nothing to check" from escapingAncestor's point of
   // view, so drop proceeded into its rescue, called mkdirSync on the same
   // dangling path, and died with a raw `Error: ENOENT ... mkdir` — not a
-  // GroveError, no named reason, and potentially after other carry paths
+  // CopseError, no named reason, and potentially after other carry paths
   // had already been rescued.
   const { root, repo } = makeRepo();
   try {
@@ -678,7 +678,7 @@ test('drop refuses to rescue through a dangling symlinked intermediate directory
     assert.throws(
       () => commandDrop('feat/x', { cwd: repo, config: nestedConfig }),
       (error) =>
-        error instanceof GroveError &&
+        error instanceof CopseError &&
         /cfg\/\.env\.test/.test(error.message) &&
         /"cfg"/.test(error.message) &&
         /does not resolve to anything/.test(error.message),
@@ -743,7 +743,7 @@ test('drop refuses to rescue by reading through a symlinked intermediate directo
     // entry and would otherwise make the worktree read as dirty before
     // drop ever reaches the check this test is for. Exclude it locally
     // (not committed — this is a property of the test fixture, not of the
-    // repository grove is asked to support) so the refusal under test is
+    // repository copse is asked to support) so the refusal under test is
     // the one actually exercised.
     appendFileSync(join(repo, '.git', 'info', 'exclude'), 'cfg\n');
     symlinkSync(outside, join(target, 'cfg'));
@@ -811,7 +811,7 @@ test('a repo-side symlinked carry path that new refused to copy does not deadloc
   // rescue). That deadlocked `new` and `drop` against each other with no
   // way out except `git worktree remove` by hand. A repository that
   // legitimately symlinks a carried path (e.g. `.env` into a shared
-  // secrets directory) must still be able to `grove drop` its worktrees.
+  // secrets directory) must still be able to `copse drop` its worktrees.
   const { root, repo } = makeRepo();
   try {
     const outside = join(root, 'outside-target');
@@ -847,7 +847,7 @@ test('a repo-side symlinked carry path that new refused to copy does not deadloc
  * with a `bare` line instead of a `branch`/`detached` one.
  */
 function makeBareRepo() {
-  const root = mkdtempSync(join(tmpdir(), 'grove-bare-'));
+  const root = mkdtempSync(join(tmpdir(), 'copse-bare-'));
   const seed = join(root, 'seed');
 
   run('git', ['init', '-b', 'devel', seed], root);
@@ -943,7 +943,7 @@ test('new refuses against a bare main repository rather than deriving a broken d
   try {
     assert.throws(
       () => commandNew('feat/x', { cwd: bareDir, config }),
-      (error) => error instanceof GroveError && /bare/.test(error.message),
+      (error) => error instanceof CopseError && /bare/.test(error.message),
     );
   } finally {
     rmSync(root, { recursive: true, force: true });

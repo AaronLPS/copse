@@ -1,11 +1,11 @@
 {
-  "name": "grove",
+  "name": "copse",
   "version": "0.0.0",
   "description": "Many agent sessions, one repository, no collisions.",
   "keywords": ["git", "worktree", "cli", "agent", "multi-agent"],
   "type": "module",
   "engines": { "node": ">=20" },
-  "bin": { "grove": "./src/cli.mjs" },
+  "bin": { "copse": "./src/cli.mjs" },
   "files": ["src"],
   "scripts": {
     "test": "node --test test/*.mjs"
