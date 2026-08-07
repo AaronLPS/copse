@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 90 24" width="90" height="24" shape-rendering="crispEdges" role="img" aria-labelledby="t">
+  <title id="t">copse</title>
+  <!--
+    Mark: a pixel git graph - one origin commit (slate) branching into
+    three parallel tracks (coral, amber, violet), each with its own
+    commits. One repository, several isolated lines of work side by side.
+    Wordmark: pixel "copse" in slate, 2x scale of a 5px pixel font.
+  -->
+  <g fill="#64748B">
+    <rect x="0" y="10" width="4" height="4"/>
+  </g>
+  <g fill="#E8604C">
+    <rect x="4" y="8" width="2" height="2"/>
+    <rect x="6" y="6" width="2" height="2"/>
+    <rect x="8" y="4" width="2" height="2"/>
+    <rect x="10" y="2" width="4" height="4"/>
+    <rect x="14" y="3" width="5" height="2"/>
+    <rect x="19" y="2" width="4" height="4"/>
+  </g>
+  <g fill="#F2A72E">
+    <rect x="4" y="11" width="6" height="2"/>
+    <rect x="10" y="10" width="4" height="4"/>
+    <rect x="14" y="11" width="5" height="2"/>
+    <rect x="19" y="10" width="4" height="4"/>
+  </g>
+  <g fill="#8B5CF6">
+    <rect x="4" y="14" width="2" height="2"/>
+    <rect x="6" y="16" width="2" height="2"/>
+    <rect x="8" y="18" width="2" height="2"/>
+    <rect x="10" y="18" width="4" height="4"/>
+    <rect x="14" y="19" width="5" height="2"/>
+    <rect x="19" y="18" width="4" height="4"/>
+  </g>
+  <g fill="#64748B" transform="translate(30 6) scale(2)">
+    <rect x="1" y="0" width="3" height="1"/>
+    <rect x="0" y="1" width="1" height="1"/>
+    <rect x="0" y="2" width="1" height="1"/>
+    <rect x="0" y="3" width="1" height="1"/>
+    <rect x="1" y="4" width="3" height="1"/>
+    <rect x="7" y="0" width="3" height="1"/>
+    <rect x="6" y="1" width="1" height="1"/>
+    <rect x="10" y="1" width="1" height="1"/>
+    <rect x="6" y="2" width="1" height="1"/>
+    <rect x="10" y="2" width="1" height="1"/>
+    <rect x="6" y="3" width="1" height="1"/>
+    <rect x="10" y="3" width="1" height="1"/>
+    <rect x="7" y="4" width="3" height="1"/>
+    <rect x="12" y="0" width="4" height="1"/>
+    <rect x="12" y="1" width="1" height="1"/>
+    <rect x="16" y="1" width="1" height="1"/>
+    <rect x="12" y="2" width="1" height="1"/>
+    <rect x="16" y="2" width="1" height="1"/>
+    <rect x="12" y="3" width="1" height="1"/>
+    <rect x="16" y="3" width="1" height="1"/>
+    <rect x="12" y="4" width="4" height="1"/>
+    <rect x="12" y="5" width="1" height="1"/>
+    <rect x="12" y="6" width="1" height="1"/>
+    <rect x="19" y="0" width="4" height="1"/>
+    <rect x="18" y="1" width="1" height="1"/>
+    <rect x="19" y="2" width="3" height="1"/>
+    <rect x="22" y="3" width="1" height="1"/>
+    <rect x="18" y="4" width="4" height="1"/>
+    <rect x="25" y="0" width="3" height="1"/>
+    <rect x="24" y="1" width="1" height="1"/>
+    <rect x="28" y="1" width="1" height="1"/>
+    <rect x="24" y="2" width="5" height="1"/>
+    <rect x="24" y="3" width="1" height="1"/>
+    <rect x="25" y="4" width="3" height="1"/>
+  </g>
+</svg>

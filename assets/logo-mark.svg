@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" shape-rendering="crispEdges" role="img" aria-labelledby="t">
+  <title id="t">copse</title>
+  <!--
+    A pixel git graph: one origin commit (slate) branching into three
+    parallel tracks - coral, amber, violet - each with its own commits.
+    One repository, several isolated lines of work side by side.
+
+    ........................
+    ........................
+    ..........CCCC.....CCCC.
+    ..........CCCCcccccCCCC.
+    ........CCCCCCcccccCCCC.
+    ........CCCCCC.....CCCC.
+    ......CC................
+    ......CC................
+    ....CC..................
+    ....CC..................
+    SSSS......AAAA.....AAAA.
+    SSSSaaaaaaAAAAaaaaaAAAA.
+    SSSSaaaaaaAAAAaaaaaAAAA.
+    SSSS......AAAA.....AAAA.
+    ....VV..................
+    ....VV..................
+    ......VV................
+    ......VV................
+    ........VVVVVV.....VVVV.
+    ........VVVVVVvvvvvVVVV.
+    ..........VVVVvvvvvVVVV.
+    ..........VVVV.....VVVV.
+    ........................
+    ........................
+  -->
+  <g fill="#64748B">
+    <rect x="0" y="10" width="4" height="4"/>
+  </g>
+  <g fill="#E8604C">
+    <rect x="4" y="8" width="2" height="2"/>
+    <rect x="6" y="6" width="2" height="2"/>
+    <rect x="8" y="4" width="2" height="2"/>
+    <rect x="10" y="2" width="4" height="4"/>
+    <rect x="14" y="3" width="5" height="2"/>
+    <rect x="19" y="2" width="4" height="4"/>
+  </g>
+  <g fill="#F2A72E">
+    <rect x="4" y="11" width="6" height="2"/>
+    <rect x="10" y="10" width="4" height="4"/>
+    <rect x="14" y="11" width="5" height="2"/>
+    <rect x="19" y="10" width="4" height="4"/>
+  </g>
+  <g fill="#8B5CF6">
+    <rect x="4" y="14" width="2" height="2"/>
+    <rect x="6" y="16" width="2" height="2"/>
+    <rect x="8" y="18" width="2" height="2"/>
+    <rect x="10" y="18" width="4" height="4"/>
+    <rect x="14" y="19" width="5" height="2"/>
+    <rect x="19" y="18" width="4" height="4"/>
+  </g>
+</svg>
