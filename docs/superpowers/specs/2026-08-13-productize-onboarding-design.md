@@ -50,7 +50,7 @@ npx copse@0.4.0 init --apply --runner-package copse@0.4.0
 An explicit value is preferred to unreliable inference from npm's temporary
 `_npx` path. When an existing parseable `copse.config.json` already declares
 `runner`, the CLI flag authorizes one targeted update of that key while every
-other byte-level JSON value is preserved. Report mode describes the pending
+other JSON value is preserved. Report mode describes the pending
 runner change; `--apply` writes it atomically before generating forwards.
 Malformed or schema-invalid configuration is reported and left unchanged.
 Without the flag, existing configuration and backwards-compatible defaults
@@ -64,6 +64,14 @@ versions for releases and an explicit Git commit/tag for GitHub production use.
 The bootstrap acceptance test installs the packed artifact in a temporary
 consumer and asserts that every generated forward contains the chosen package
 spec rather than the source checkout or bare `npx copse` default.
+
+When the runner changes, init replaces only forwards that exactly match the
+previous effective copse configuration. In Codex and Claude settings it removes
+the exact old copse hook groups and adds the new groups while preserving every
+consumer group. An exact previously generated CI workflow is updated in place;
+a custom workflow is accepted only when its verify job contains the new exact
+runner argv. Unknown or consumer-owned old-runner wiring is reported as a
+conflict rather than leaving two copse hook groups active.
 
 ### Non-destructive Git-hook delegation
 
