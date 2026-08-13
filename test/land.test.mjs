@@ -55,6 +55,7 @@ test('base refresh recovery switches branches before suggesting a fast-forward',
     refreshed: false, refreshReason: 'main worktree is not on main', cleaned: false,
     localBranchDeleted: false, remoteBranchDeleteAttempted: false, remoteBranchDeleted: false,
   });
+  assert.match(messages[0], /commit or stash.*confirm it is clean/);
   assert.match(messages[0], /git -C \/repo switch main/);
   assert.ok(messages[0].indexOf('switch main') < messages[0].indexOf('merge --ff-only'));
 });

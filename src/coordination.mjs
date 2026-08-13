@@ -1,4 +1,5 @@
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { dirname } from 'node:path';
 import { gitCommonDir, worktreeRoot } from './git.mjs';
@@ -186,44 +187,51 @@ export function updateCoordination(path, updater, {
 } = {}) {
   mkdirSync(dirname(path), { recursive: true });
   const lockPath = `${path}.lock`;
-  const recoveryPath = `${lockPath}.recovery`;
-  let recovery;
+  mkdirSync(lockPath, { recursive: true });
+  const contenderName = `${randomUUID()}.json`;
+  const contenderPath = `${lockPath}/${contenderName}`;
+  writeFileSync(contenderPath, JSON.stringify({ pid: process.pid, host, createdAt: now }) + '\n', { flag: 'wx' });
+
+  const contenders = [];
   try {
-    recovery = openSync(recoveryPath, 'wx');
-  } catch (error) {
-    if (error.code === 'EEXIST') throw new Error(`coordination state is being updated: ${path}`);
-    throw error;
-  }
-  let lock;
-  try {
-    try {
-      lock = openSync(lockPath, 'wx');
-    } catch (error) {
-      if (error.code !== 'EEXIST') throw error;
-      if (!staleLock(lockPath, { now, host, processAlive, lockTimeoutMs })) {
-        throw new Error(`coordination state is being updated: ${path}`);
+    for (const name of readdirSync(lockPath)) {
+      const contender = `${lockPath}/${name}`;
+      if (name !== contenderName) {
+        let stale;
+        try {
+          stale = staleLock(contender, { now, host, processAlive, lockTimeoutMs });
+        } catch (error) {
+          if (error.code === 'ENOENT') continue;
+          throw error;
+        }
+        if (stale) {
+          try { unlinkSync(contender); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+          continue;
+        }
       }
-      unlinkSync(lockPath);
-      lock = openSync(lockPath, 'wx');
+      let stat;
+      try { stat = statSync(contender, { bigint: true }); }
+      catch (error) { if (error.code === 'ENOENT') continue; else throw error; }
+      let record = null;
+      try { record = JSON.parse(readFileSync(contender, 'utf8')); } catch { /* legacy lock contender */ }
+      const createdAt = Number.isFinite(record?.createdAt) ? record.createdAt : Number(stat.birthtimeMs);
+      contenders.push({ name, createdAt, createdNs: stat.birthtimeNs });
     }
-    try {
-      writeFileSync(lock, JSON.stringify({ pid: process.pid, host, createdAt: now }) + '\n');
-    } catch (error) {
-      closeSync(lock);
-      unlinkSync(lockPath);
-      throw error;
+    contenders.sort((left, right) => {
+      if (left.createdAt !== right.createdAt) return left.createdAt - right.createdAt;
+      if (left.createdNs !== right.createdNs) return left.createdNs < right.createdNs ? -1 : 1;
+      return left.name.localeCompare(right.name);
+    });
+    if (contenders[0]?.name !== contenderName) {
+      throw new Error(`coordination state is being updated: ${path}`);
     }
-  } finally {
-    closeSync(recovery);
-    unlinkSync(recoveryPath);
-  }
-  try {
+
     const next = updater(loadCoordination(path));
     saveCoordination(path, next);
     return next;
   } finally {
-    closeSync(lock);
-    unlinkSync(lockPath);
+    try { unlinkSync(contenderPath); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    try { rmdirSync(lockPath); } catch (error) { if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(error.code)) throw error; }
   }
 }
 

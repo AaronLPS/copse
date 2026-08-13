@@ -56,7 +56,7 @@ export function landRecoveryMessages({
     if (!mainPath) {
       commands = `locate a clean ${baseBranch} main worktree, then fetch and fast-forward it`;
     } else if (refreshReason === `main worktree is not on ${baseBranch}`) {
-      commands = `run ${shownCommand(['git', '-C', mainPath, 'switch', baseBranch])}, then run ${fetch}, then run ${merge}`;
+      commands = `commit or stash any changes in ${shownArg(mainPath)} and confirm it is clean, then run ${shownCommand(['git', '-C', mainPath, 'switch', baseBranch])}, then run ${fetch}, then run ${merge}`;
     } else if (refreshReason === 'main worktree is not known-clean') {
       commands = `commit or stash the changes in ${shownArg(mainPath)}, confirm it is on ${shownArg(baseBranch)}, then run ${fetch}, then run ${merge}`;
     } else {

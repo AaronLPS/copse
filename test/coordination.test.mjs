@@ -29,9 +29,13 @@ test('atomic coordination update refuses a concurrent writer', () => {
   const root = mkdtempSync(join(tmpdir(), 'copse-coordinate-'));
   const path = join(root, 'state', 'features.json');
   mkdirSync(join(root, 'state'));
-  const lock = openSync(`${path}.lock`, 'wx');
+  mkdirSync(`${path}.lock`);
+  const lock = openSync(join(`${path}.lock`, 'live.json'), 'wx');
   try {
-    assert.throws(() => updateCoordination(path, (state) => state), /being updated/);
+    writeFileSync(lock, JSON.stringify({ pid: process.pid, host: 'test-host', createdAt: 1_000 }));
+    assert.throws(() => updateCoordination(path, (state) => state, {
+      host: 'test-host', now: 2_000, processAlive: () => true,
+    }), /being updated/);
   } finally {
     closeSync(lock);
     rmSync(root, { recursive: true, force: true });
@@ -42,7 +46,8 @@ test('atomic coordination update reclaims a lock owned by a dead local process',
   const root = mkdtempSync(join(tmpdir(), 'copse-coordinate-'));
   const path = join(root, 'state', 'features.json');
   mkdirSync(join(root, 'state'));
-  writeFileSync(`${path}.lock`, JSON.stringify({ pid: 404, host: 'test-host', createdAt: 1_000 }));
+  mkdirSync(`${path}.lock`);
+  writeFileSync(join(`${path}.lock`, 'dead.json'), JSON.stringify({ pid: 404, host: 'test-host', createdAt: 1_000 }));
   try {
     const state = updateCoordination(path, (current) => current, {
       host: 'test-host',
@@ -59,16 +64,18 @@ test('stale-lock reclamation serializes competing reclaimers', () => {
   const root = mkdtempSync(join(tmpdir(), 'copse-coordinate-'));
   const path = join(root, 'state', 'features.json');
   mkdirSync(join(root, 'state'));
-  writeFileSync(`${path}.lock`, JSON.stringify({ pid: 404, host: 'test-host', createdAt: 1_000 }));
+  mkdirSync(`${path}.lock`);
+  writeFileSync(join(`${path}.lock`, 'dead.json'), JSON.stringify({ pid: 404, host: 'test-host', createdAt: 1_000 }));
   let competingError;
   try {
     updateCoordination(path, (current) => current, {
       host: 'test-host',
       now: 2_000,
-      processAlive() {
+      processAlive(pid) {
+        if (pid !== 404) return true;
         try {
           updateCoordination(path, (current) => current, {
-            host: 'test-host', now: 2_000, processAlive: () => false,
+            host: 'test-host', now: 2_000, processAlive: (candidate) => candidate !== 404,
           });
         } catch (error) {
           competingError = error;
