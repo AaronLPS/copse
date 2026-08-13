@@ -50,9 +50,18 @@ export function landRecoveryMessages({
 }) {
   const messages = [];
   if (!refreshed) {
-    const commands = mainPath
-      ? `run ${shownCommand(['git', '-C', mainPath, 'fetch', '--prune', 'origin'])}, then run ${shownCommand(['git', '-C', mainPath, 'merge', '--ff-only', `origin/${baseBranch}`])}`
-      : `locate a clean ${baseBranch} main worktree, then fetch and fast-forward it`;
+    const fetch = mainPath ? shownCommand(['git', '-C', mainPath, 'fetch', '--prune', 'origin']) : null;
+    const merge = mainPath ? shownCommand(['git', '-C', mainPath, 'merge', '--ff-only', `origin/${baseBranch}`]) : null;
+    let commands;
+    if (!mainPath) {
+      commands = `locate a clean ${baseBranch} main worktree, then fetch and fast-forward it`;
+    } else if (refreshReason === `main worktree is not on ${baseBranch}`) {
+      commands = `run ${shownCommand(['git', '-C', mainPath, 'switch', baseBranch])}, then run ${fetch}, then run ${merge}`;
+    } else if (refreshReason === 'main worktree is not known-clean') {
+      commands = `commit or stash the changes in ${shownArg(mainPath)}, confirm it is on ${shownArg(baseBranch)}, then run ${fetch}, then run ${merge}`;
+    } else {
+      commands = `confirm ${shownArg(mainPath)} is clean and on ${shownArg(baseBranch)}, then run ${fetch}, then run ${merge}`;
+    }
     messages.push(`main was not refreshed (${refreshReason}); recover with: ${commands}`);
   }
   if (cleanup && !cleaned) {

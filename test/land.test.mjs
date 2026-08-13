@@ -48,3 +48,13 @@ test('partial land failures include exact recovery commands', () => {
   assert.match(messages.join('\n'), /git -C \/repo branch -d feat\/x/);
   assert.match(messages.join('\n'), /git -C \/repo push origin --delete feat\/x/);
 });
+
+test('base refresh recovery switches branches before suggesting a fast-forward', () => {
+  const messages = landRecoveryMessages({
+    branch: 'feat/x', baseBranch: 'main', mainPath: '/repo', cleanup: false,
+    refreshed: false, refreshReason: 'main worktree is not on main', cleaned: false,
+    localBranchDeleted: false, remoteBranchDeleteAttempted: false, remoteBranchDeleted: false,
+  });
+  assert.match(messages[0], /git -C \/repo switch main/);
+  assert.ok(messages[0].indexOf('switch main') < messages[0].indexOf('merge --ff-only'));
+});

@@ -156,6 +156,24 @@ test('start refuses a foreign owner before creating a worktree', async () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test('start rolls back its automatic claim when worktree provisioning fails', async () => {
+  const { root, repo } = makeRepo();
+  try {
+    const config = parseConfig({ verify: [['npm', 'test']] }).config;
+    await assert.rejects(commandStart('feat/provision-fails', {
+      cwd: repo,
+      config,
+      owner: 'alice@host',
+      command: ['agent'],
+      create() { throw new Error('provisioning exploded'); },
+      run: async () => 0,
+    }), /provisioning exploded/);
+    const state = loadCoordination(coordinationStatePath({ cwd: repo, config }));
+    assert.equal(state.features['feat/provision-fails'], undefined);
+    assert.equal(state.leases['feat/provision-fails'], undefined);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('doctor reports a configured local hook runner that cannot execute', () => {
   const { root, repo } = makeRepo();
   try {

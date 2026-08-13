@@ -55,6 +55,33 @@ test('atomic coordination update reclaims a lock owned by a dead local process',
   }
 });
 
+test('stale-lock reclamation serializes competing reclaimers', () => {
+  const root = mkdtempSync(join(tmpdir(), 'copse-coordinate-'));
+  const path = join(root, 'state', 'features.json');
+  mkdirSync(join(root, 'state'));
+  writeFileSync(`${path}.lock`, JSON.stringify({ pid: 404, host: 'test-host', createdAt: 1_000 }));
+  let competingError;
+  try {
+    updateCoordination(path, (current) => current, {
+      host: 'test-host',
+      now: 2_000,
+      processAlive() {
+        try {
+          updateCoordination(path, (current) => current, {
+            host: 'test-host', now: 2_000, processAlive: () => false,
+          });
+        } catch (error) {
+          competingError = error;
+        }
+        return false;
+      },
+    });
+    assert.match(competingError?.message ?? '', /being updated/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('claim refuses ownership theft and dependency cycles', () => {
   let state = claimFeature(empty(), 'feat/a', { owner: 'alice', dependsOn: ['feat/b'] });
   state = claimFeature(state, 'feat/b', { owner: 'bob', dependsOn: [] });

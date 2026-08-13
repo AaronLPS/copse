@@ -186,26 +186,36 @@ export function updateCoordination(path, updater, {
 } = {}) {
   mkdirSync(dirname(path), { recursive: true });
   const lockPath = `${path}.lock`;
+  const recoveryPath = `${lockPath}.recovery`;
+  let recovery;
+  try {
+    recovery = openSync(recoveryPath, 'wx');
+  } catch (error) {
+    if (error.code === 'EEXIST') throw new Error(`coordination state is being updated: ${path}`);
+    throw error;
+  }
   let lock;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  try {
     try {
       lock = openSync(lockPath, 'wx');
-      try {
-        writeFileSync(lock, JSON.stringify({ pid: process.pid, host, createdAt: now }) + '\n');
-      } catch (error) {
-        closeSync(lock);
-        unlinkSync(lockPath);
-        throw error;
-      }
-      break;
     } catch (error) {
       if (error.code !== 'EEXIST') throw error;
-      if (attempt === 0 && staleLock(lockPath, { now, host, processAlive, lockTimeoutMs })) {
-        unlinkSync(lockPath);
-        continue;
+      if (!staleLock(lockPath, { now, host, processAlive, lockTimeoutMs })) {
+        throw new Error(`coordination state is being updated: ${path}`);
       }
-      throw new Error(`coordination state is being updated: ${path}`);
+      unlinkSync(lockPath);
+      lock = openSync(lockPath, 'wx');
     }
+    try {
+      writeFileSync(lock, JSON.stringify({ pid: process.pid, host, createdAt: now }) + '\n');
+    } catch (error) {
+      closeSync(lock);
+      unlinkSync(lockPath);
+      throw error;
+    }
+  } finally {
+    closeSync(recovery);
+    unlinkSync(recoveryPath);
   }
   try {
     const next = updater(loadCoordination(path));

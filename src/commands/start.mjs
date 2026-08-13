@@ -44,6 +44,7 @@ export async function commandStart(branch, {
   now = Date.now,
   leaseId = randomUUID(),
   resources = [],
+  create = commandNew,
 } = {}) {
   if (!branch) throw new CopseError('usage: copse start <branch> [--agent codex|claude] [-- <command...>]');
   const parsed = parseBranchName(branch, config);
@@ -55,10 +56,14 @@ export async function commandStart(branch, {
   const statePath = coordinationStatePath({ cwd, config });
   const timeoutMs = config.leaseTimeoutSeconds * 1_000;
   const host = hostname();
+  let automaticClaim = false;
+  let previousFeature = null;
   updateCoordination(statePath, (state) => {
     const feature = state.features[branch];
     let next = state;
     if (!feature || feature.status === 'released') {
+      automaticClaim = true;
+      previousFeature = feature ? structuredClone(feature) : null;
       next = claimFeature(state, branch, { owner, dependsOn: feature?.dependsOn ?? [] });
     } else if (feature.owner !== owner) {
       throw new CopseError(`${branch} is already owned by ${feature.owner}`);
@@ -77,10 +82,16 @@ export async function commandStart(branch, {
   });
 
   let heartbeat;
+  let provisioningFailed = false;
   try {
     if (!entry) {
-      const created = commandNew(branch, { cwd, config });
-      entry = { path: created.path, branch };
+      try {
+        const created = create(branch, { cwd, config });
+        entry = { path: created.path, branch };
+      } catch (error) {
+        provisioningFailed = true;
+        throw error;
+      }
     }
     console.log(`→ launching ${argv.join(' ')} in ${entry.path}`);
     const launched = launchInWorktree(entry.path, argv, {
@@ -106,7 +117,14 @@ export async function commandStart(branch, {
   } finally {
     if (heartbeat) clearInterval(heartbeat);
     try {
-      updateCoordination(statePath, (state) => releaseLease(state, branch, leaseId));
+      updateCoordination(statePath, (state) => {
+        const next = releaseLease(state, branch, leaseId);
+        if (provisioningFailed && automaticClaim) {
+          if (previousFeature) next.features[branch] = previousFeature;
+          else delete next.features[branch];
+        }
+        return next;
+      });
     } catch {
       // A reclaimed lease belongs to another launcher and must not be removed.
     }
