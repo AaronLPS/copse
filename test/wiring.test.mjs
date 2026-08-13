@@ -18,6 +18,19 @@ test('desired wiring covers Codex, Claude, instructions, coordination and CI', (
   assert.match(files.get('.github/workflows/copse.yml'), /git config core\.hooksPath \.copse\/hooks/);
 });
 
+test('CI runner is a JSON-quoted YAML scalar that extracts to the exact shell command', () => {
+  const artifact = '/tmp/artifacts with spaces $;[packed]/copse.tgz';
+  const workflow = desiredWiring({
+    verify: [['npm', 'test']],
+    runner: ['npx', '--yes', artifact],
+  }).get('.github/workflows/copse.yml');
+  const line = workflow.split('\n').find((candidate) => candidate.includes(artifact));
+  const scalar = line?.match(/^\s*- run: (.+)$/)?.[1];
+
+  assert.match(scalar ?? '', /^"/);
+  assert.equal(JSON.parse(scalar), `'npx' '--yes' '${artifact}' verify`);
+});
+
 test('reconcile reports conflicts and apply never overwrites them', () => {
   const root = mkdtempSync(join(tmpdir(), 'copse-wire-'));
   try {

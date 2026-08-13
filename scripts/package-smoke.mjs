@@ -18,11 +18,13 @@ const root = resolve(new URL('..', import.meta.url).pathname);
 // must preserve it as one argv element, even where generated forwards use sh.
 const temp = mkdtempSync(join(tmpdir(), 'copse-package-'));
 const fixture = join(root, 'scripts', 'fixtures', 'recording-agent.mjs');
+const supervisor = join(root, 'scripts', 'fixtures', 'session-supervisor.mjs');
 const codexMarker = join(temp, 'codex-marker.json');
 const claudeMarker = join(temp, 'claude-marker.json');
 const codexGate = join(temp, 'codex-gate');
 const claudeGate = join(temp, 'claude-gate');
 const runnerLog = join(temp, 'runner-invocations.jsonl');
+const grandchildPidPath = join(temp, 'grandchild.pid');
 const children = [];
 const mutation = process.env.COPSE_PACKAGE_SMOKE_MUTATION ?? '';
 const CHILD_EXIT_TIMEOUT_MS = 2_000;
@@ -48,15 +50,24 @@ function waitFor(check, timeoutMs = 5_000) {
   });
 }
 
-function start(command, args, options) {
-  const child = spawn(command, args, {
+function start(command, args, options, label) {
+  const statusPath = join(temp, `${label}-supervisor.json`);
+  const child = spawn(process.execPath, [supervisor, statusPath, '--', command, ...args], {
     ...options,
     detached: process.platform !== 'win32',
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: 'ignore',
   });
-  const record = { child, stdout: '', stderr: '', completed: null, agentPid: null };
-  child.stdout.on('data', (chunk) => { record.stdout += chunk; });
-  child.stderr.on('data', (chunk) => { record.stderr += chunk; });
+  const record = {
+    child,
+    label,
+    statusPath,
+    stdout: '',
+    stderr: '',
+    completed: null,
+    launcherPid: null,
+    launcherOutcome: null,
+    agentPid: null,
+  };
   record.outcome = new Promise((resolveExit) => {
     child.once('error', (error) => resolveExit({ error }));
     child.once('close', (code, signal) => resolveExit({ code, signal }));
@@ -66,13 +77,28 @@ function start(command, args, options) {
   return record;
 }
 
+function refreshSupervisor(record) {
+  if (!record || !existsSync(record.statusPath)) return null;
+  try {
+    const status = JSON.parse(readFileSync(record.statusPath, 'utf8'));
+    record.stdout = status.stdout ?? record.stdout;
+    record.stderr = status.stderr ?? record.stderr;
+    record.launcherPid = status.launcherPid ?? record.launcherPid;
+    if (status.launcher?.completed) record.launcherOutcome = status.launcher;
+    return status;
+  } catch {
+    return null;
+  }
+}
+
 function processOutput(record, label) {
+  refreshSupervisor(record);
   return `${label} stdout:\n${record?.stdout ?? '<not started>'}\n` +
     `${label} stderr:\n${record?.stderr ?? '<not started>'}`;
 }
 
 async function requireSuccess(record, label, timeoutMs = CHILD_EXIT_TIMEOUT_MS) {
-  const outcome = await outcomeWithin(record, timeoutMs);
+  const outcome = await launcherOutcomeWithin(record, timeoutMs);
   if (!outcome) {
     throw new Error(`${label} timed out after ${timeoutMs}ms\n${processOutput(record, label)}`);
   }
@@ -82,6 +108,17 @@ async function requireSuccess(record, label, timeoutMs = CHILD_EXIT_TIMEOUT_MS) 
       processOutput(record, label),
     );
   }
+}
+
+async function launcherOutcomeWithin(record, timeoutMs) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    refreshSupervisor(record);
+    if (record.launcherOutcome) return record.launcherOutcome;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 25));
+  }
+  refreshSupervisor(record);
+  return record.launcherOutcome;
 }
 
 async function outcomeWithin(record, timeoutMs) {
@@ -105,31 +142,13 @@ function pidIsAlive(pid) {
   }
 }
 
-async function recordStoppedWithin(record, timeoutMs) {
-  const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
-    if (record.completed && !pidIsAlive(record.agentPid)) return true;
-    await new Promise((resolveWait) => setTimeout(resolveWait, 25));
-  }
-  return Boolean(record.completed) && !pidIsAlive(record.agentPid);
-}
-
-function taskkill(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return;
+function processGroupIsAlive(pgid) {
+  if (process.platform === 'win32' || !Number.isInteger(pgid) || pgid <= 0) return false;
   try {
-    execFileSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' });
-  } catch { /* an already-exited process is the desired state */ }
-}
-
-function signalProcessTree(record, signal) {
-  if (process.platform === 'win32') {
-    if (!record.completed) taskkill(record.child.pid);
-    if (pidIsAlive(record.agentPid)) taskkill(record.agentPid);
-    return;
-  }
-  try { process.kill(-record.child.pid, signal); } catch { /* process group may already be gone */ }
-  if (pidIsAlive(record.agentPid)) {
-    try { process.kill(record.agentPid, signal); } catch { /* agent exited between checks */ }
+    process.kill(-pgid, 0);
+    return true;
+  } catch (error) {
+    return error.code === 'EPERM';
   }
 }
 
@@ -138,15 +157,37 @@ async function stopChildren() {
     try { writeFileSync(gate, 'release\n'); } catch { /* setup may have failed before the temp root was usable */ }
   }
   for (const record of children) {
-    if (await recordStoppedWithin(record, CHILD_EXIT_TIMEOUT_MS)) continue;
-    signalProcessTree(record, 'SIGTERM');
-    if (await recordStoppedWithin(record, CHILD_EXIT_TIMEOUT_MS)) continue;
-    signalProcessTree(record, 'SIGKILL');
-    if (!await recordStoppedWithin(record, CHILD_EXIT_TIMEOUT_MS)) {
-      throw new Error(
-        `could not prove launcher ${record.child.pid} and configured agent ${record.agentPid ?? '<unknown>'} exited\n` +
-        processOutput(record, 'cleanup'),
-      );
+    refreshSupervisor(record);
+    if (record.completed?.error && !record.launcherPid) continue;
+    if (record.completed || !pidIsAlive(record.child.pid)) {
+      throw new Error(`supervisor ${record.child.pid} exited before owned-tree teardown; refusing a stale PID/group target`);
+    }
+
+    if (process.platform === 'win32') {
+      try {
+        execFileSync('taskkill', ['/PID', String(record.child.pid), '/T', '/F'], { stdio: 'ignore' });
+      } catch (error) {
+        throw new Error(`taskkill could not terminate live supervisor tree ${record.child.pid}: ${error.message}`);
+      }
+      if (!await outcomeWithin(record, CHILD_EXIT_TIMEOUT_MS) || pidIsAlive(record.child.pid)) {
+        throw new Error(`could not prove Windows supervisor tree ${record.child.pid} exited`);
+      }
+      continue;
+    }
+
+    process.kill(-record.child.pid, 'SIGTERM');
+    await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+    if (record.completed || !pidIsAlive(record.child.pid)) {
+      throw new Error(`supervisor ${record.child.pid} did not retain its owned group through graceful teardown`);
+    }
+    process.kill(-record.child.pid, 'SIGKILL');
+    if (!await outcomeWithin(record, CHILD_EXIT_TIMEOUT_MS)) {
+      throw new Error(`supervisor ${record.child.pid} did not exit after owned-group SIGKILL`);
+    }
+    try {
+      await waitFor(() => !processGroupIsAlive(record.child.pid), CHILD_EXIT_TIMEOUT_MS);
+    } catch {
+      throw new Error(`could not prove owned process group ${record.child.pid} is gone`);
     }
   }
 }
@@ -199,6 +240,8 @@ function requireDuplicateBlocked(runCopse, branch, agent, owner) {
 }
 
 let cleanupMutationComplete = false;
+let cleanupGrandchildPid = null;
+let acceptanceMessage = null;
 try {
   const packed = JSON.parse(run('npm', ['pack', '--json', '--pack-destination', temp], { cwd: root }));
   const artifactDir = join(temp, 'artifacts with spaces $;[packed]');
@@ -263,7 +306,11 @@ if (result.error) throw result.error;
 process.exit(result.status ?? 1);
 `);
   chmodSync(fakeNpx, 0o755);
-  const env = { ...process.env, PATH: `${fakeBin}:${process.env.PATH}` };
+  const env = {
+    ...process.env,
+    PATH: `${fakeBin}:${process.env.PATH}`,
+    COPSE_GRANDCHILD_PID_PATH: grandchildPidPath,
+  };
   const runCopse = (args, options = {}) => run(copse, args, { cwd: consumer, env, ...options });
 
   const help = runCopse(['--help']);
@@ -356,13 +403,15 @@ process.exit(result.status ?? 1);
   });
 
   const workflow = readFileSync(join(consumer, '.github', 'workflows', 'copse.yml'), 'utf8');
-  const expectedCiLine = `      - run: ${runnerCommand} verify`;
-  requireExact(
-    workflow.split('\n').filter((line) => line.includes(artifact)),
-    [expectedCiLine],
-    'CI runner representation',
-  );
-  run('sh', ['-c', `${runnerCommand} verify`], { cwd: consumer, env });
+  const artifactLines = workflow.split('\n').filter((line) => line.includes(artifact));
+  requireExact(artifactLines.length, 1, 'CI artifact-bearing runner count');
+  const ciScalar = artifactLines[0].match(/^\s*- run: (.+)$/)?.[1];
+  let ciCommand;
+  try { ciCommand = JSON.parse(ciScalar); } catch (error) {
+    throw new Error(`CI runner scalar was not valid JSON/YAML: ${error.message}`);
+  }
+  requireExact(ciCommand, `${runnerCommand} verify`, 'CI extracted runner command');
+  run('sh', ['-c', ciCommand], { cwd: consumer, env });
 
   const runnerInvocations = readFileSync(runnerLog, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
   requireExact(runnerInvocations, [
@@ -379,7 +428,7 @@ process.exit(result.status ?? 1);
 
   const codexSession = start(copse, [
     'start', 'feat/codex-agent', '--agent', 'codex', '--owner', 'codex@host',
-  ], { cwd: consumer, env });
+  ], { cwd: consumer, env }, 'codex');
   const statePath = join(consumer, '.git', 'copse', 'features.json');
   let claudeSession = null;
   let state;
@@ -396,7 +445,7 @@ process.exit(result.status ?? 1);
     codexSession.agentPid = codexLease.childPid;
     claudeSession = start(copse, [
       'start', 'feat/claude-agent', '--agent', 'claude', '--owner', 'claude@host',
-    ], { cwd: consumer, env });
+    ], { cwd: consumer, env }, 'claude');
     state = await waitForLifecycle('timed out waiting for two packaged agent leases', () => {
       if (!existsSync(statePath)) return null;
       const value = JSON.parse(readFileSync(statePath, 'utf8'));
@@ -450,12 +499,13 @@ process.exit(result.status ?? 1);
     throw new Error('agent sessions dirtied the main worktree');
   }
 
-  if (mutation === 'launcher-closes-before-agent') {
-    codexSession.child.kill('SIGKILL');
-    codexSession.child.stdout.destroy();
-    codexSession.child.stderr.destroy();
-    if (!await outcomeWithin(codexSession, 2_000)) throw new Error('cleanup mutation could not stop the Codex launcher');
-    throw new CleanupMutationComplete('launcher closed while its configured agent remained alive');
+  if (mutation === 'grandchild-survives') {
+    cleanupGrandchildPid = await waitFor(() => {
+      if (!existsSync(grandchildPidPath)) return null;
+      const pid = Number(readFileSync(grandchildPidPath, 'utf8').trim());
+      return Number.isInteger(pid) && pidIsAlive(pid) ? pid : null;
+    });
+    throw new CleanupMutationComplete('configured agent left a live grandchild');
   }
 
   const snapshot = JSON.parse(runCopse(['list', '--json']));
@@ -500,18 +550,15 @@ process.exit(result.status ?? 1);
   runCopse(['verify']);
 
   const installed = JSON.parse(readFileSync(join(consumer, 'node_modules', 'copse', 'package.json'), 'utf8'));
-  console.log(`package acceptance ok: copse ${installed.version}, ${packed[0].files.length} files`);
+  acceptanceMessage = `package acceptance ok: copse ${installed.version}, ${packed[0].files.length} files`;
 } catch (error) {
   if (!(error instanceof CleanupMutationComplete)) throw error;
   cleanupMutationComplete = true;
 } finally {
   await stopChildren();
-  const liveAgents = children.filter((record) => pidIsAlive(record.agentPid));
-  if (liveAgents.length > 0) {
-    throw new Error(`cleanup could not prove configured agent PID(s) exited: ${liveAgents.map((record) => record.agentPid).join(', ')}`);
-  }
-  const liveLaunchers = children.filter((record) => !record.completed);
-  if (liveLaunchers.length > 0) throw new Error('cleanup could not prove every launcher exited');
+  const liveSupervisors = children.filter((record) => !record.completed);
+  if (liveSupervisors.length > 0) throw new Error('cleanup could not prove every supervisor exited');
   rmSync(temp, { recursive: true, force: true });
 }
-if (cleanupMutationComplete) console.log('package cleanup mutation ok: launcher and configured agent exited');
+if (cleanupMutationComplete) console.log('package cleanup mutation ok: owned supervisor tree and grandchild exited');
+else console.log(acceptanceMessage);

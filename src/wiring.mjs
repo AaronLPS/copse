@@ -28,7 +28,7 @@ function ciSetupLines(config) {
         : mode === 'custom'
           ? (config.ciSetup ?? [])
           : [];
-  return commands.map((argv) => `      - run: ${shellCommand(argv)}\n`).join('');
+  return commands.map((argv) => `      - run: ${JSON.stringify(shellCommand(argv))}\n`).join('');
 }
 
 export function desiredWiring(config) {
@@ -50,7 +50,7 @@ export function desiredWiring(config) {
     },
     ...(projectRoot ? { $schema: 'https://json.schemastore.org/claude-code-settings.json' } : {}),
   }, null, 2) + '\n';
-  const workflow = `name: copse\n\non:\n  pull_request:\n  push:\n    branches: [${config.baseBranch ?? 'main'}]\n\npermissions:\n  contents: read\n\nconcurrency:\n  group: copse-\${{ github.workflow }}-\${{ github.ref }}\n  cancel-in-progress: true\n\njobs:\n  verify:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 20\n${ciSetupLines(config)}      - run: git config core.hooksPath .copse/hooks\n      - run: ${forward} verify\n`;
+  const workflow = `name: copse\n\non:\n  pull_request:\n  push:\n    branches: [${config.baseBranch ?? 'main'}]\n\npermissions:\n  contents: read\n\nconcurrency:\n  group: copse-\${{ github.workflow }}-\${{ github.ref }}\n  cancel-in-progress: true\n\njobs:\n  verify:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 20\n${ciSetupLines(config)}      - run: ${JSON.stringify('git config core.hooksPath .copse/hooks')}\n      - run: ${JSON.stringify(`${forward} verify`)}\n`;
   const state = JSON.stringify({ version: 1, features: {} }, null, 2) + '\n';
   const files = new Map([
     ['.codex/hooks.json', agentHooks(false)],
@@ -118,10 +118,13 @@ function includesGroup(groups, wanted) {
 
 export function wiringMatches(relative, actual, expected) {
   if (relative === '.github/workflows/copse.yml') {
-    const runner = expected.match(/^\s*- run: (.+) verify\s*$/m)?.[1];
-    const escapedRunner = runner?.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return actual === expected || (escapedRunner !== undefined
-      && new RegExp(`^\\s*- run: ${escapedRunner} verify\\s*$`, 'm').test(actual));
+    const commands = (text) => text.split('\n').flatMap((line) => {
+      const scalar = line.match(/^\s*- run: (.+)$/)?.[1];
+      if (!scalar) return [];
+      try { return [JSON.parse(scalar)]; } catch { return [scalar]; }
+    });
+    const expectedVerify = commands(expected).find((command) => command.endsWith(' verify'));
+    return actual === expected || (expectedVerify !== undefined && commands(actual).includes(expectedVerify));
   }
   if (!agentSettingsPath(relative)) return actual === expected;
   const have = parseJson(actual);
