@@ -1,7 +1,8 @@
 import {
-  accessSync, chmodSync, constants, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync,
+  accessSync, chmodSync, constants, existsSync, lstatSync, mkdirSync, readFileSync, renameSync,
+  writeFileSync,
 } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 
 export function detectCiMode(root) {
   if (existsSync(join(root, 'pnpm-lock.yaml'))) return 'pnpm';
@@ -84,6 +85,30 @@ function executable(path) {
   }
 }
 
+function gitHookFileState(root, relative) {
+  const resolvedRoot = resolve(root);
+  const resolvedPath = resolve(root, relative);
+  if (!resolvedPath.startsWith(resolvedRoot + sep)) return { safe: false, exists: false };
+
+  const segments = relative.split('/');
+  let current = resolvedRoot;
+  for (let index = 0; index < segments.length; index += 1) {
+    current = join(current, segments[index]);
+    let stat;
+    try {
+      stat = lstatSync(current);
+    } catch (error) {
+      if (error.code === 'ENOENT') return { safe: true, exists: false };
+      return { safe: false, exists: false };
+    }
+    if (stat.isSymbolicLink()) return { safe: false, exists: true };
+    const leaf = index === segments.length - 1;
+    if (!leaf && !stat.isDirectory()) return { safe: false, exists: true };
+    if (leaf) return { safe: stat.isFile(), exists: true };
+  }
+  return { safe: false, exists: false };
+}
+
 function parseJson(text) { try { return JSON.parse(text); } catch { return null; } }
 
 function includesGroup(groups, wanted) {
@@ -140,7 +165,13 @@ export function reconcileWiring(root, desired, { apply = false, previousDesired 
   const report = { missing: [], matching: [], conflicts: [], created: [], updated: [] };
   for (const [relative, content] of desired) {
     const path = join(root, relative);
-    if (!existsSync(path)) {
+    const hookState = gitHookPath(relative) ? gitHookFileState(root, relative) : null;
+    if (hookState && !hookState.safe) {
+      report.conflicts.push(relative);
+      continue;
+    }
+    const pathExists = hookState ? hookState.exists : existsSync(path);
+    if (!pathExists) {
       report.missing.push(relative);
       if (apply) {
         atomicWrite(path, content);

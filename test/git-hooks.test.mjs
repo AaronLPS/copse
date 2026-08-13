@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import {
+  chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -80,4 +82,44 @@ test('reconciliation repairs exact Copse wrappers that lost execute mode', () =>
       assert.equal(statSync(join(root, relative)).mode & 0o111, 0o111);
     }
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('reconciliation refuses an exact Copse wrapper reached through a leaf symlink', () => {
+  const base = mkdtempSync(join(tmpdir(), 'copse-hooks-symlink-'));
+  try {
+    const root = join(base, 'project');
+    const relative = '.copse/hooks/pre-commit';
+    const expected = desiredGitHooks(config).get(relative);
+    const external = join(base, 'external-pre-commit');
+    mkdirSync(join(root, '.copse', 'hooks'), { recursive: true });
+    writeFileSync(external, expected, { mode: 0o644 });
+    symlinkSync(external, join(root, relative));
+
+    const report = reconcileWiring(root, new Map([[relative, expected]]), { apply: true });
+
+    assert.ok(report.conflicts.includes(relative));
+    assert.equal(readFileSync(external, 'utf8'), expected);
+    assert.equal(statSync(external).mode & 0o777, 0o644);
+  } finally { rmSync(base, { recursive: true, force: true }); }
+});
+
+test('reconciliation refuses an exact Copse wrapper beneath a symlinked ancestor', () => {
+  const base = mkdtempSync(join(tmpdir(), 'copse-hooks-symlink-'));
+  try {
+    const root = join(base, 'project');
+    const relative = '.copse/hooks/pre-commit';
+    const expected = desiredGitHooks(config).get(relative);
+    const externalDir = join(base, 'external-hooks');
+    const external = join(externalDir, 'pre-commit');
+    mkdirSync(join(root, '.copse'), { recursive: true });
+    mkdirSync(externalDir);
+    writeFileSync(external, expected, { mode: 0o644 });
+    symlinkSync(externalDir, join(root, '.copse', 'hooks'));
+
+    const report = reconcileWiring(root, new Map([[relative, expected]]), { apply: true });
+
+    assert.ok(report.conflicts.includes(relative));
+    assert.equal(readFileSync(external, 'utf8'), expected);
+    assert.equal(statSync(external).mode & 0o777, 0o644);
+  } finally { rmSync(base, { recursive: true, force: true }); }
 });
