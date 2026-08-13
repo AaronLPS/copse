@@ -10,4 +10,11 @@ writeFileSync(marker, JSON.stringify({
   branch: execFileSync('git', ['branch', '--show-current'], { encoding: 'utf8' }).trim(),
   forwarded,
 }) + '\n');
+if (process.env.COPSE_PACKAGE_SMOKE_MUTATION === 'launcher-closes-before-agent' && label === 'codex') {
+  process.stdout.destroy();
+  process.stderr.destroy();
+}
 while (!existsSync(gate)) await new Promise((resolve) => setTimeout(resolve, 25));
+if (['hang-after-codex-gate', 'launcher-closes-before-agent'].includes(process.env.COPSE_PACKAGE_SMOKE_MUTATION) && label === 'codex') {
+  while (true) await new Promise((resolve) => setTimeout(resolve, 1_000));
+}
