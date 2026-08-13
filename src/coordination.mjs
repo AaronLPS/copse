@@ -1,4 +1,5 @@
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { hostname } from 'node:os';
 import { dirname } from 'node:path';
 import { gitCommonDir, worktreeRoot } from './git.mjs';
 
@@ -75,11 +76,12 @@ export function acquireLease(state, branch, {
   processAlive = () => true,
   resources = [],
 }) {
-  const next = normalizeCoordination(state);
+  let next = normalizeCoordination(state);
   const existing = next.leases[branch];
   if (leaseStatus(existing, { now, host, processAlive }) === 'active') {
     throw new Error(`${branch} already has an active session owned by ${existing.owner}`);
   }
+  if (existing) next = releaseResources(next, branch, { leaseId: existing.id });
   next.leases[branch] = {
     id,
     owner,
@@ -151,15 +153,59 @@ export function saveCoordination(path, state) {
   renameSync(temp, path);
 }
 
-export function updateCoordination(path, updater) {
+function localProcessAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === 'EPERM';
+  }
+}
+
+function staleLock(path, {
+  now,
+  host,
+  processAlive,
+  lockTimeoutMs,
+}) {
+  let record = null;
+  try { record = JSON.parse(readFileSync(path, 'utf8')); } catch { /* legacy or interrupted lock write */ }
+  const createdAt = Number.isFinite(record?.createdAt)
+    ? record.createdAt
+    : statSync(path).mtimeMs;
+  if (now - createdAt > lockTimeoutMs) return true;
+  return record?.host === host && !processAlive(record.pid);
+}
+
+export function updateCoordination(path, updater, {
+  now = Date.now(),
+  host = hostname(),
+  processAlive = localProcessAlive,
+  lockTimeoutMs = 30_000,
+} = {}) {
   mkdirSync(dirname(path), { recursive: true });
   const lockPath = `${path}.lock`;
   let lock;
-  try {
-    lock = openSync(lockPath, 'wx');
-  } catch (error) {
-    if (error.code === 'EEXIST') throw new Error(`coordination state is being updated: ${path}`);
-    throw error;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      lock = openSync(lockPath, 'wx');
+      try {
+        writeFileSync(lock, JSON.stringify({ pid: process.pid, host, createdAt: now }) + '\n');
+      } catch (error) {
+        closeSync(lock);
+        unlinkSync(lockPath);
+        throw error;
+      }
+      break;
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      if (attempt === 0 && staleLock(lockPath, { now, host, processAlive, lockTimeoutMs })) {
+        unlinkSync(lockPath);
+        continue;
+      }
+      throw new Error(`coordination state is being updated: ${path}`);
+    }
   }
   try {
     const next = updater(loadCoordination(path));

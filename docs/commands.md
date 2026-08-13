@@ -62,8 +62,8 @@ it reports readiness only. With `--yes` it merges through `gh`, marks the
 feature released, refreshes a clean main worktree with a fast-forward, and
 removes the feature worktree when invoked safely from elsewhere. Local and
 remote branch deletion are separate guarded steps. `--create-pr` may create a
-missing PR explicitly; partial success is returned without disguising cleanup
-or refresh failures.
+missing PR explicitly; partial success prints each cleanup or refresh failure
+with an exact recovery command and is also returned to programmatic callers.
 
 ## `copse drop <branch-or-slug>`
 

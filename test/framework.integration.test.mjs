@@ -140,6 +140,22 @@ test('start automatically claims a feature and refuses a duplicate live session'
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test('start refuses a foreign owner before creating a worktree', async () => {
+  const { root, repo } = makeRepo();
+  try {
+    const config = parseConfig({ verify: [['npm', 'test']] }).config;
+    commandClaim('feat/owned', { cwd: repo, config, owner: 'alice@host' });
+    await assert.rejects(commandStart('feat/owned', {
+      cwd: repo,
+      config,
+      owner: 'bob@host',
+      command: ['agent'],
+      run: async () => 0,
+    }), /owned by alice@host/);
+    assert.equal(existsSync(join(root, 'project-feat-owned')), false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('doctor reports a configured local hook runner that cannot execute', () => {
   const { root, repo } = makeRepo();
   try {

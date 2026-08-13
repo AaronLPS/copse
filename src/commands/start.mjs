@@ -52,11 +52,6 @@ export async function commandStart(branch, {
   if (!argv) throw new CopseError(`unknown agent "${agent}"; configured agents: ${Object.keys(config.agents).join(', ')}`);
 
   let entry = worktrees({ cwd }).find((worktree) => worktree.branch === branch);
-  if (!entry) {
-    const created = commandNew(branch, { cwd, config });
-    entry = { path: created.path, branch };
-  }
-
   const statePath = coordinationStatePath({ cwd, config });
   const timeoutMs = config.leaseTimeoutSeconds * 1_000;
   const host = hostname();
@@ -81,9 +76,13 @@ export async function commandStart(branch, {
     });
   });
 
-  console.log(`→ launching ${argv.join(' ')} in ${entry.path}`);
   let heartbeat;
   try {
+    if (!entry) {
+      const created = commandNew(branch, { cwd, config });
+      entry = { path: created.path, branch };
+    }
+    console.log(`→ launching ${argv.join(' ')} in ${entry.path}`);
     const launched = launchInWorktree(entry.path, argv, {
       run,
       onSpawn(childPid) {

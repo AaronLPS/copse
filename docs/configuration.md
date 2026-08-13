@@ -36,6 +36,10 @@ Resource names such as `port:3000`, `db:test`, or `emulator:ios` are mutexes.
 Claims reserve them until release; resources passed only to `start` follow its
 session lease and are released on exit.
 
+Coordination mutations use owner-stamped lock files. A proven-dead local owner
+or a lock older than the bounded recovery timeout is reclaimed after a crash;
+a live or recent unknown owner continues to block concurrent mutation.
+
 ## Branch and directory mapping
 
 A feature branch has exactly one slash and the shape

@@ -10,21 +10,61 @@ import { commandDrop } from './drop.mjs';
 
 export function refreshBaseAfterMerge(config, { cwd = process.cwd() } = {}) {
   const main = worktrees({ cwd }).find((entry) => entry.isMain);
-  if (!main || main.bare) return { refreshed: false, reason: 'main worktree is unavailable' };
-  if (main.branch !== config.baseBranch) return { refreshed: false, reason: `main worktree is not on ${config.baseBranch}` };
+  if (!main || main.bare) return { refreshed: false, reason: 'main worktree is unavailable', mainPath: main?.path ?? null };
+  if (main.branch !== config.baseBranch) return { refreshed: false, reason: `main worktree is not on ${config.baseBranch}`, mainPath: main.path };
   const state = worktreeState(main.path);
-  if (state.dirty !== false) return { refreshed: false, reason: 'main worktree is not known-clean' };
+  if (state.dirty !== false) return { refreshed: false, reason: 'main worktree is not known-clean', mainPath: main.path };
   const remote = `refs/remotes/origin/${config.baseBranch}`;
   if (git(['rev-parse', '--verify', remote], { cwd: main.path, allowFailure: true }) === null) {
-    return { refreshed: false, reason: `origin/${config.baseBranch} is unavailable` };
+    return { refreshed: false, reason: `origin/${config.baseBranch} is unavailable`, mainPath: main.path };
   }
   if (git(['fetch', '--prune', 'origin'], { cwd: main.path, allowFailure: true }) === null) {
-    return { refreshed: false, reason: 'fetching origin failed' };
+    return { refreshed: false, reason: 'fetching origin failed', mainPath: main.path };
   }
   if (git(['merge', '--ff-only', `origin/${config.baseBranch}`], { cwd: main.path, allowFailure: true }) === null) {
-    return { refreshed: false, reason: 'main worktree could not fast-forward' };
+    return { refreshed: false, reason: 'main worktree could not fast-forward', mainPath: main.path };
   }
-  return { refreshed: true, reason: null };
+  return { refreshed: true, reason: null, mainPath: main.path };
+}
+
+function shownArg(value) {
+  return /^[a-zA-Z0-9_./:@-]+$/.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function shownCommand(args) {
+  return args.map(shownArg).join(' ');
+}
+
+export function landRecoveryMessages({
+  branch,
+  baseBranch,
+  mainPath,
+  cleanup,
+  cleanupReason = null,
+  refreshed,
+  refreshReason,
+  cleaned,
+  localBranchDeleted,
+  remoteBranchDeleteAttempted,
+  remoteBranchDeleted,
+}) {
+  const messages = [];
+  if (!refreshed) {
+    const commands = mainPath
+      ? `run ${shownCommand(['git', '-C', mainPath, 'fetch', '--prune', 'origin'])}, then run ${shownCommand(['git', '-C', mainPath, 'merge', '--ff-only', `origin/${baseBranch}`])}`
+      : `locate a clean ${baseBranch} main worktree, then fetch and fast-forward it`;
+    messages.push(`main was not refreshed (${refreshReason}); recover with: ${commands}`);
+  }
+  if (cleanup && !cleaned) {
+    messages.push(`worktree was not removed${cleanupReason ? ` (${cleanupReason})` : ''}; recover from outside it with: copse drop ${shownArg(branch)}`);
+  }
+  if (cleaned && !localBranchDeleted) {
+    messages.push(`local branch was not deleted; recover with: ${shownCommand(['git', '-C', mainPath, 'branch', '-d', branch])}`);
+  }
+  if (remoteBranchDeleteAttempted && !remoteBranchDeleted) {
+    messages.push(`remote branch was not deleted; recover with: ${shownCommand(['git', '-C', mainPath, 'push', 'origin', '--delete', branch])}`);
+  }
+  return messages;
 }
 
 export function commandLand(branch, { cwd = process.cwd(), config, yes = false, cleanup = true, createPr = false, run } = {}) {
@@ -68,16 +108,37 @@ export function commandLand(branch, { cwd = process.cwd(), config, yes = false, 
   const refreshed = refreshBaseAfterMerge(config, { cwd });
   let localBranchDeleted = false;
   let remoteBranchDeleted = false;
+  let remoteBranchDeleteAttempted = false;
+  let cleanupReason = null;
   const entryPath = resolve(entry.path);
   if (cleanup && resolvedCwd !== entryPath && !resolvedCwd.startsWith(entryPath + sep)) {
-    commandDrop(branch, { cwd, config });
-    cleaned = true;
-    localBranchDeleted = git(['branch', '-d', branch], { cwd, allowFailure: true }) !== null;
-    if (git(['rev-parse', '--verify', `refs/remotes/origin/${branch}`], { cwd, allowFailure: true }) !== null) {
-      remoteBranchDeleted = git(['push', 'origin', '--delete', branch], { cwd, allowFailure: true }) !== null;
+    try {
+      commandDrop(branch, { cwd, config });
+      cleaned = true;
+      localBranchDeleted = git(['branch', '-d', branch], { cwd, allowFailure: true }) !== null;
+      if (git(['rev-parse', '--verify', `refs/remotes/origin/${branch}`], { cwd, allowFailure: true }) !== null) {
+        remoteBranchDeleteAttempted = true;
+        remoteBranchDeleted = git(['push', 'origin', '--delete', branch], { cwd, allowFailure: true }) !== null;
+      }
+    } catch (error) {
+      cleanupReason = error.message;
     }
   }
-  console.log(`✓ merged ${branch}${cleaned ? ' and removed its worktree' : cleanup ? '; run copse drop from another worktree to clean up' : ''}`);
+  const recovery = landRecoveryMessages({
+    branch,
+    baseBranch: config.baseBranch,
+    mainPath: refreshed.mainPath,
+    cleanup,
+    cleanupReason,
+    refreshed: refreshed.refreshed,
+    refreshReason: refreshed.reason,
+    cleaned,
+    localBranchDeleted,
+    remoteBranchDeleteAttempted,
+    remoteBranchDeleted,
+  });
+  console.log(`✓ merged ${branch}${cleaned ? ' and removed its worktree' : ''}`);
+  for (const message of recovery) console.log(`  ⚠ ${message}`);
   return {
     ready: true,
     merged: true,
@@ -85,6 +146,8 @@ export function commandLand(branch, { cwd = process.cwd(), config, yes = false, 
     refreshReason: refreshed.reason,
     cleaned,
     localBranchDeleted,
+    remoteBranchDeleteAttempted,
     remoteBranchDeleted,
+    recovery,
   };
 }
