@@ -1,6 +1,6 @@
 {
   "name": "copse",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Many agent sessions, one repository, no collisions.",
   "keywords": [
     "git",

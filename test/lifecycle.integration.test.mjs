@@ -105,6 +105,28 @@ function makeRepo() {
   return { root, repo };
 }
 
+function makeLocalRepo() {
+  const root = mkdtempSync(join(tmpdir(), 'copse-local-'));
+  const repo = join(root, 'proj');
+  run('git', ['init', '-b', 'devel', repo], root);
+  run('git', ['config', 'user.email', 'test@example.com'], repo);
+  run('git', ['config', 'user.name', 'Test'], repo);
+  writeFileSync(join(repo, 'README.md'), '# local\n');
+  run('git', ['add', '-A'], repo);
+  run('git', ['commit', '-m', 'first'], repo);
+  return { root, repo };
+}
+
+test('new uses the local base branch when origin is absent', () => {
+  const { root, repo } = makeLocalRepo();
+  try {
+    const localConfig = parseConfig({ baseBranch: 'devel' }).config;
+    const created = commandNew('feat/local', { cwd: repo, config: localConfig });
+    assert.ok(existsSync(created.path));
+    run('git', ['merge-base', '--is-ancestor', 'devel', 'feat/local'], repo);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('new creates the derived directory and carries the ignored file', () => {
   const { root, repo } = makeRepo();
   try {

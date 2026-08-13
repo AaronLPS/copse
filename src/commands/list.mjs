@@ -11,11 +11,18 @@ import { dirname, relative } from 'node:path';
 import { pullRequestFor, worktreeState, worktrees } from '../git.mjs';
 import { driftNote, pullRequestLookupBranch, pullRequestNote } from '../decisions.mjs';
 import { coordinationStatePath, featureBlockers, loadCoordination } from '../coordination.mjs';
+import { inspectListeningPort } from '../process.mjs';
 
-export function commandList({ cwd = process.cwd(), config, json = false }) {
+function describeResource(name, inspectPort) {
+  const listener = inspectPort(name);
+  if (!listener) return name;
+  return `${name} (pid ${listener.pid}${listener.command ? ` ${listener.command}` : ''}${listener.cwd ? `, cwd ${listener.cwd}` : ''})`;
+}
+
+export function commandList({ cwd = process.cwd(), config, json = false, inspectPort = inspectListeningPort }) {
   const entries = worktrees({ cwd });
   const repoDir = entries.find((entry) => entry.isMain).path;
-  const coordination = loadCoordination(coordinationStatePath({ cwd }));
+  const coordination = loadCoordination(coordinationStatePath({ cwd, config }));
   const parent = dirname(repoDir);
   let drifted = 0;
 
@@ -24,8 +31,18 @@ export function commandList({ cwd = process.cwd(), config, json = false }) {
       path: entry.path, branch: entry.branch, main: entry.isMain, detached: entry.detached,
       coordination: entry.branch ? coordination.features[entry.branch] ?? null : null,
       blockedBy: entry.branch ? featureBlockers(coordination, entry.branch) : [],
+      lease: entry.branch ? coordination.leases[entry.branch] ?? null : null,
     }));
-    console.log(JSON.stringify({ version: 1, worktrees: snapshot, features: coordination.features }, null, 2));
+    const resourceListeners = Object.fromEntries(Object.keys(coordination.resources)
+      .map((name) => [name, inspectPort(name)])
+      .filter(([, listener]) => listener));
+    console.log(JSON.stringify({
+      version: 1,
+      worktrees: snapshot,
+      features: coordination.features,
+      resources: coordination.resources,
+      resourceListeners,
+    }, null, 2));
     return snapshot;
   }
 
@@ -79,6 +96,16 @@ export function commandList({ cwd = process.cwd(), config, json = false }) {
     if (feature) {
       const blocked = featureBlockers(coordination, entry.branch);
       console.log(`  ${''.padEnd(38)} owner ${feature.owner}, ${feature.status}${blocked.length ? `, blocked by ${blocked.join(', ')}` : ''}`);
+    }
+    const lease = entry.branch ? coordination.leases[entry.branch] : null;
+    if (lease) {
+      console.log(`  ${''.padEnd(38)} active session ${lease.owner}${lease.label ? ` (${lease.label})` : ''}`);
+    }
+    const resources = entry.branch
+      ? Object.entries(coordination.resources).filter(([, value]) => value.branch === entry.branch).map(([name]) => name)
+      : [];
+    if (resources.length) {
+      console.log(`  ${''.padEnd(38)} resources ${resources.map((name) => describeResource(name, inspectPort)).join(', ')}`);
     }
   }
 

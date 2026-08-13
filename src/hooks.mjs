@@ -26,14 +26,28 @@ export function gitHookDecision(event, { branch, config, updates = [] }) {
   return { ok: true };
 }
 
-function mutates(input) {
-  if (['apply_patch', 'Edit', 'Write'].includes(input.tool_name)) return true;
-  if (input.tool_name !== 'Bash') return false;
-  const command = input.tool_input?.command ?? input.tool_input?.cmd ?? '';
+export function normalizeAgentEvent(input) {
+  const toolInput = input.tool_input ?? input.toolInput ?? input.input ?? {};
+  return {
+    ...input,
+    hook_event_name: input.hook_event_name ?? input.hookEventName ?? input.event,
+    tool_name: input.tool_name ?? input.toolName ?? input.tool,
+    tool_input: toolInput,
+    cwd: input.cwd ?? toolInput.cwd,
+  };
+}
+
+function mutates(rawInput) {
+  const input = normalizeAgentEvent(rawInput);
+  if (['apply_patch', 'Edit', 'Write', 'edit', 'write'].includes(input.tool_name)) return true;
+  if (!['Bash', 'shell', 'exec_command', 'unified_exec'].includes(input.tool_name)) return false;
+  const argv = input.tool_input?.argv;
+  const command = input.tool_input?.command ?? input.tool_input?.cmd ?? (Array.isArray(argv) ? argv.join(' ') : '');
   return /(^|[;&|]\s*|\s)(git\s+(add|commit|push|merge|rebase|checkout|switch|worktree)|rm\b|mv\b|cp\b|mkdir\b|touch\b|npm\s+(install|uninstall)|sed\s+-i\b)/.test(command);
 }
 
 export function agentHookOutput(input, context) {
+  input = normalizeAgentEvent(input);
   if (input.hook_event_name === 'SessionStart') {
     const main = context.worktreePath === context.mainPath;
     const coordination = context.feature

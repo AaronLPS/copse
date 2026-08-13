@@ -1,6 +1,33 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
+export function detectCiMode(root) {
+  if (existsSync(join(root, 'pnpm-lock.yaml'))) return 'pnpm';
+  if (existsSync(join(root, 'yarn.lock'))) return 'yarn';
+  if (existsSync(join(root, 'package-lock.json')) || existsSync(join(root, 'package.json'))) return 'npm';
+  return 'none';
+}
+
+function shellCommand(argv) {
+  return argv.map((part) => /^[a-zA-Z0-9_./:@=-]+$/.test(part)
+    ? part
+    : `'${part.replaceAll("'", `'\\''`)}'`).join(' ');
+}
+
+function ciSetupLines(config) {
+  const mode = config.ciMode ?? 'npm';
+  const commands = mode === 'npm'
+    ? [['npm', 'install']]
+    : mode === 'pnpm'
+      ? [['corepack', 'enable'], ['pnpm', 'install', '--frozen-lockfile']]
+      : mode === 'yarn'
+        ? [['corepack', 'enable'], ['yarn', 'install', '--immutable']]
+        : mode === 'custom'
+          ? (config.ciSetup ?? [])
+          : [];
+  return commands.map((argv) => `      - run: ${shellCommand(argv)}\n`).join('');
+}
+
 export function desiredWiring(config) {
   const quote = (part) => `'${part.replaceAll("'", `'\\''`)}'`;
   const forward = (config.runner ?? ['npx', '--yes', 'copse']).map(quote).join(' ');
@@ -13,7 +40,7 @@ export function desiredWiring(config) {
 `;
   const enterRoot = 'cd "$(git rev-parse --show-toplevel)"';
   const hook = (event) => `#!/bin/sh\n${enterRoot} || exit 1\nexec ${forward} hook ${event} "$@"\n`;
-  const agentCommand = (event) => `${enterRoot} && exec ${forward} hook ${event}`;
+  const agentCommand = (event) => `${enterRoot} && exec ${forward} hook ${event} --protocol 1`;
   const agentHooks = (projectRoot) => JSON.stringify({
     hooks: {
       SessionStart: [{ matcher: 'startup|resume|clear|compact', hooks: [{ type: 'command', command: agentCommand('agent-session-start'), additionalContextLimit: 2000 }] }],
@@ -21,7 +48,7 @@ export function desiredWiring(config) {
     },
     ...(projectRoot ? { $schema: 'https://json.schemastore.org/claude-code-settings.json' } : {}),
   }, null, 2) + '\n';
-  const workflow = `name: copse\n\non:\n  pull_request:\n  push:\n    branches: [${config.baseBranch ?? 'main'}]\n\npermissions:\n  contents: read\n\nconcurrency:\n  group: copse-\${{ github.workflow }}-\${{ github.ref }}\n  cancel-in-progress: true\n\njobs:\n  verify:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 20\n      - run: npm install\n      - run: git config core.hooksPath .githooks\n      - run: ${forward} verify\n`;
+  const workflow = `name: copse\n\non:\n  pull_request:\n  push:\n    branches: [${config.baseBranch ?? 'main'}]\n\npermissions:\n  contents: read\n\nconcurrency:\n  group: copse-\${{ github.workflow }}-\${{ github.ref }}\n  cancel-in-progress: true\n\njobs:\n  verify:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 20\n${ciSetupLines(config)}      - run: git config core.hooksPath .githooks\n      - run: ${forward} verify\n`;
   const state = JSON.stringify({ version: 1, features: {} }, null, 2) + '\n';
   const files = new Map([
     ['.githooks/pre-commit', hook('pre-commit')],

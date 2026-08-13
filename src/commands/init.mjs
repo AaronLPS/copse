@@ -3,15 +3,16 @@ import { join } from 'node:path';
 
 import { CONFIG_FILENAME } from '../config.mjs';
 import { git, worktreeRoot } from '../git.mjs';
-import { desiredWiring, reconcileWiring } from '../wiring.mjs';
+import { desiredWiring, detectCiMode, reconcileWiring } from '../wiring.mjs';
 
 export function commandInit({ cwd = process.cwd(), config, apply = false }) {
   const repoDir = worktreeRoot({ cwd });
   let effective = config;
+  if (config.ciMode === 'auto') effective = { ...effective, ciMode: detectCiMode(repoDir) };
   if (config.verify.length === 0 && existsSync(join(repoDir, 'package.json'))) {
     try {
       const pkg = JSON.parse(readFileSync(join(repoDir, 'package.json'), 'utf8'));
-      if (pkg.scripts?.test) effective = { ...config, verify: [['npm', 'test']] };
+      if (pkg.scripts?.test) effective = { ...effective, verify: [['npm', 'test']] };
     } catch { /* malformed package.json is not init's file to diagnose */ }
   }
   const configPath = join(repoDir, CONFIG_FILENAME);

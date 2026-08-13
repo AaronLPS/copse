@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { spawn as nodeSpawn, spawnSync } from 'node:child_process';
 
 export function runCommand(command, args = [], {
   cwd = process.cwd(),
@@ -26,4 +26,63 @@ export function runCommand(command, args = [], {
     throw new Error(`${command} ${args.join(' ')} failed (${status}):\n${output.stderr || output.stdout}`);
   }
   return output;
+}
+
+export function inspectListeningPort(resource, { run = runCommand } = {}) {
+  const match = /^port:([1-9]\d{0,4})$/.exec(resource);
+  if (!match) return null;
+  const port = Number(match[1]);
+  if (port > 65_535) return null;
+
+  const listener = run('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-Fpc'], { allowFailure: true });
+  if (!listener.ok) return null;
+  const pid = Number(/^p(\d+)$/m.exec(listener.stdout)?.[1]);
+  if (!Number.isInteger(pid)) return null;
+  const command = /^c(.+)$/m.exec(listener.stdout)?.[1] ?? null;
+
+  const directory = run('lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn'], { allowFailure: true });
+  const cwd = directory.ok ? /^n(.+)$/m.exec(directory.stdout)?.[1] ?? null : null;
+  return { port, pid, command, cwd };
+}
+
+export function runInteractive(command, args = [], {
+  cwd = process.cwd(),
+  env = process.env,
+  spawn = nodeSpawn,
+  onSpawn,
+} = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd,
+      env,
+      stdio: 'inherit',
+      shell: false,
+    });
+    const forwarded = [];
+    const cleanup = () => {
+      for (const [signal, listener] of forwarded) process.off(signal, listener);
+    };
+    for (const signal of ['SIGINT', 'SIGTERM']) {
+      const listener = () => {
+        if (typeof child.kill === 'function') child.kill(signal);
+      };
+      process.on(signal, listener);
+      forwarded.push([signal, listener]);
+    }
+    child.once('error', (error) => {
+      cleanup();
+      reject(error);
+    });
+    child.once('exit', (code, signal) => {
+      cleanup();
+      resolve(code ?? (signal ? 1 : 0));
+    });
+    try {
+      onSpawn?.(child.pid);
+    } catch (error) {
+      cleanup();
+      if (typeof child.kill === 'function') child.kill('SIGTERM');
+      reject(error);
+    }
+  });
 }

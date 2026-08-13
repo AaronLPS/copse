@@ -10,8 +10,9 @@ Many agent sessions, one repository, no collisions.
 copse is the repository framework for running Claude Code, Codex, or ordinary
 shell-driven feature work in parallel. It gives every feature a deterministic
 Git worktree, carries ignored local files such as `.env`, installs shared Git
-and agent hooks, records ownership and dependencies, runs one verification path
-locally and in CI, and gates PR merge and cleanup.
+and agent hooks, records ownership, dependencies, live sessions, and shared
+resources, runs one verification path locally and in CI, and closes PR
+creation, merge, refresh, and cleanup.
 
 It coordinates mechanics, not product judgment: copse does not choose tasks,
 schedule models, or automatically resolve semantic merge conflicts.
@@ -41,16 +42,17 @@ For repeated use before the npm release, set the generated runner explicitly:
 Then start isolated work:
 
 ```sh
-copse claim feat/inbox-filter --owner alice --depends-on feat/search-api
-copse start feat/inbox-filter --agent codex
+copse claim feat/inbox-filter --owner alice --depends-on feat/search-api --resource port:3000
+copse start feat/inbox-filter --agent codex --owner alice
 # or: copse start feat/inbox-filter --agent claude
 # or: copse start feat/inbox-filter -- npm run dev
 ```
 
-`start` finds or creates the worktree and launches the chosen command with that
-worktree as its working directory. A child process cannot change its parent
-shell's directory, so this launcher—not a fragile `cd` hook—is the reliable
-automatic entry point.
+`start` finds or creates the worktree, claims the feature when necessary, and
+holds an exclusive process-aware session lease while the command runs. A
+second agent cannot enter the same feature worktree; dead processes and expired
+heartbeats are reclaimed. A child process cannot change its parent shell's
+directory, so this launcher—not a fragile `cd` hook—is the reliable entry point.
 
 ## Lifecycle
 
@@ -60,7 +62,8 @@ flowchart LR
     C --> S["copse start"]
     S --> W["agent works in isolated worktree"]
     W --> V["copse verify"]
-    V --> L["copse land --yes"]
+    V --> P["copse pr"]
+    P --> L["copse land --yes"]
     L --> D["release coordination state<br/>and safely remove worktree"]
 ```
 
@@ -73,13 +76,14 @@ the backstop when agent hooks are disabled or untrusted.
 ## Commands
 
 ```text
-copse init [--apply]                 inspect/apply repository wiring
+copse init [--apply] [--ci mode]     inspect/apply repository wiring
 copse new <branch>                   create a worktree and carry local files
 copse start <branch> [--agent name]  create/find it and launch an agent
 copse claim <branch> [options]       record owner and dependencies
 copse release <branch>               mark a dependency released
 copse list [--json]                  worktrees, PRs, ownership and blockers
 copse verify                         doctor, then configured argv checks
+copse pr [branch] [--draft]          verify and create a pull request
 copse land [branch] [--yes]          gate, merge and safely clean up
 copse drop <branch>                  remove only when nothing can be lost
 copse doctor                         validate wiring and worktree state
@@ -109,6 +113,12 @@ go through a shell.
     "claude": ["claude"]
   },
   "coordinationFile": ".copse/features.json",
+  "coordinationBackend": "local",
+  "leaseTimeoutSeconds": 300,
+  "leaseHeartbeatSeconds": 30,
+  "resources": { "feat/inbox-filter": ["port:3000"] },
+  "ciMode": "auto",
+  "ciSetup": [],
   "runner": ["npx", "--yes", "copse"]
 }
 ```
@@ -125,10 +135,14 @@ them. Claude Code exposes its project hooks through its own `/hooks` browser.
 The generated commands delegate to the configured `runner`, so upgrades live
 in the package rather than copied hook implementations.
 
-Live feature ownership is stored in Git's common directory at
+By default live ownership, leases, and resources are stored in Git's common directory at
 `.git/copse/features.json`, immediately visible from all worktrees without
-dirtying a branch. The committed `.copse/features.json` documents the state
-format and seeds new clones.
+dirtying a branch. `coordinationBackend: "committed"` instead writes the
+configured reviewed file for cross-machine synchronization. The committed seed
+initializes local state in a fresh clone.
+
+For resources named `port:<number>`, `copse list` and `copse doctor` also show
+the listening process PID and working directory when `lsof` is available.
 
 ## Development
 

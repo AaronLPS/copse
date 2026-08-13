@@ -15,12 +15,32 @@ keys and every invalid value are reported together.
 | `agents` | Codex and Claude defaults | map of lowercase names to argv arrays |
 | `coordinationFile` | `.copse/features.json` | safe relative seed/documentation path |
 | `runner` | `npx --yes copse` | argv prefix used by generated forwards |
+| `leaseTimeoutSeconds` | `300` | positive integer; dead/expired sessions may be reclaimed |
+| `leaseHeartbeatSeconds` | `30` | positive integer shorter than the lease timeout |
+| `resources` | `{}` | feature branch to shared resource-name arrays |
+| `coordinationBackend` | `local` | `local` Git-common state or `committed` reviewed state |
+| `ciMode` | `auto` | `auto`, `npm`, `pnpm`, `yarn`, `custom`, or `none` |
+| `ciSetup` | `[]` | argv arrays used only by custom CI setup |
 
 Command values are arrays so elements are passed directly to child processes
 and cannot become shell operators. Absolute paths, `..`, and backslashes are
 refused for carried and coordination paths. Carried leaf and intermediate
 symlinks are checked again at copy time; `carryDirs` trees are also walked and
 refuse every nested symlink before copying or rescue begins.
+
+`ciMode: auto` detects `pnpm-lock.yaml`, `yarn.lock`, `package-lock.json`, or
+`package.json`. Every generated workflow installs Node because copse itself
+requires it, but only npm/pnpm/yarn modes install project dependencies.
+
+Resource names such as `port:3000`, `db:test`, or `emulator:ios` are mutexes.
+Claims reserve them until release; resources passed only to `start` follow its
+session lease and are released on exit.
+
+Coordination mutations use uniquely named, owner-stamped lock contenders. A
+proven-dead local owner or a contender older than the bounded recovery timeout
+is reclaimed after a crash; unique contender paths make that reclamation safe
+when several sessions race. A live or recent unknown owner continues to block
+concurrent mutation.
 
 ## Branch and directory mapping
 

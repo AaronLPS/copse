@@ -5,16 +5,19 @@
  * Collects worktree, carried-path, generated-forward, hook-path and CI findings
  * in one pass and exits non-zero if any are present.
  */
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { accessSync, constants, existsSync, readFileSync } from 'node:fs';
+import { isAbsolute, join, resolve } from 'node:path';
 
 import { carryPathState, git, mainWorktree, worktreeRoot, worktrees } from '../git.mjs';
 import { driftNote } from '../decisions.mjs';
 import { CONFIG_FILENAME } from '../config.mjs';
 import { desiredWiring, wiringMatches } from '../wiring.mjs';
+import { coordinationStatePath, loadCoordination } from '../coordination.mjs';
+import { inspectListeningPort } from '../process.mjs';
 
-export function commandDoctor({ cwd = process.cwd(), config }) {
+export function commandDoctor({ cwd = process.cwd(), config, inspectPort = inspectListeningPort }) {
   const findings = [];
+  const observations = [];
   const repoDir = mainWorktree({ cwd }).path;
   const wiringRoot = worktreeRoot({ cwd });
 
@@ -42,6 +45,20 @@ export function commandDoctor({ cwd = process.cwd(), config }) {
     if (note !== null) findings.push(`${entry.path}: ${note.replace(/^⚠ /, '')}`);
   }
 
+  const coordination = loadCoordination(coordinationStatePath({ cwd, config }));
+  for (const [name, reservation] of Object.entries(coordination.resources)) {
+    if (reservation.leaseId) {
+      const lease = coordination.leases[reservation.branch];
+      if (!lease || lease.id !== reservation.leaseId) {
+        findings.push(`stale resource reservation ${name}: owning lease no longer exists`);
+      }
+    }
+    const listener = inspectPort(name);
+    if (listener) {
+      observations.push(`${name} listens on pid ${listener.pid}${listener.command ? ` (${listener.command})` : ''}${listener.cwd ? ` in ${listener.cwd}` : ''}`);
+    }
+  }
+
   if (existsSync(join(wiringRoot, CONFIG_FILENAME))) {
     for (const [relative, expected] of desiredWiring(config)) {
       const path = join(wiringRoot, relative);
@@ -50,9 +67,19 @@ export function commandDoctor({ cwd = process.cwd(), config }) {
     }
     const hooksPath = git(['config', '--local', '--get', 'core.hooksPath'], { cwd: wiringRoot, allowFailure: true });
     if (hooksPath !== '.githooks') findings.push('git core.hooksPath is not .githooks');
+    const runner = config.runner?.[0];
+    if (runner?.includes('/') || isAbsolute(runner ?? '')) {
+      const runnerPath = isAbsolute(runner) ? runner : resolve(wiringRoot, runner);
+      try {
+        accessSync(runnerPath, constants.X_OK);
+      } catch {
+        findings.push(`configured hook runner is not executable: ${runner}`);
+      }
+    }
   }
 
   console.log('');
+  for (const observation of observations) console.log(`  · ${observation}`);
   if (findings.length === 0) {
     console.log('✓ copse: nothing to report\n');
   } else {
@@ -60,5 +87,5 @@ export function commandDoctor({ cwd = process.cwd(), config }) {
     console.log(`\n✗ ${findings.length} finding(s)\n`);
   }
 
-  return { ok: findings.length === 0, findings };
+  return { ok: findings.length === 0, findings, observations };
 }

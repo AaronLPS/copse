@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-copse is pre-1.0 (currently `0.2.0`) and not yet published to npm. Only
+copse is pre-1.0 (currently `0.3.0`) and not yet published to npm. Only
 the latest version is supported — there is no back-porting of fixes to
 older tags.
 
@@ -77,6 +77,11 @@ things it does are worth naming plainly rather than leaving implicit:
 - **Coordination writes are atomic and remain inside Git's common directory.**
   They are immediately shared by all worktrees, do not dirty a branch, and
   use an exclusive lock to prevent concurrent lost updates.
+- **Agent sessions use process-aware leases.** A live local child process plus
+  heartbeat prevents a second launcher from entering the same worktree. Lease
+  release and resource cleanup are id-scoped, so a stale launcher cannot erase
+  a replacement session's state. This is collision prevention, not a sandbox:
+  a process started outside copse is still outside copse's control.
 - **Carried directories are walked without following links before copying.**
   A symlink anywhere below a `carryDirs` entry is named and refused in both
   copy and rescue directions, so recursive copying cannot plant a live link

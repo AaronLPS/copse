@@ -13,6 +13,7 @@ import { commandRelease } from './commands/release.mjs';
 import { commandVerify } from './commands/verify.mjs';
 import { commandLand } from './commands/land.mjs';
 import { commandProtect } from './commands/protect.mjs';
+import { commandPr } from './commands/pr.mjs';
 
 const USAGE = `
   copse init [--apply]                reconcile project wiring
@@ -22,6 +23,7 @@ const USAGE = `
   copse release <branch>              mark a feature dependency released
   copse list [--json]                 worktrees, pull requests and coordination
   copse verify                        doctor, then configured checks
+  copse pr [branch] [--draft]         verify and create a pull request
   copse land [branch] [--yes]         gate and merge a pull request
   copse drop <branch>                 safely remove a worktree
   copse doctor                        validate all project wiring and state
@@ -51,22 +53,30 @@ const config = loaded.config;
 try {
   let status = 0;
   switch (command) {
-    case 'init': status = commandInit({ config, apply: argv.includes('--apply') }).ok ? 0 : 1; break;
+    case 'init': {
+      const ciMode = valuesAfter(argv, '--ci')[0];
+      const initConfig = ciMode ? { ...config, ciMode } : config;
+      status = commandInit({ config: initConfig, apply: argv.includes('--apply') }).ok ? 0 : 1;
+      break;
+    }
     case 'new': commandNew(argument, { config }); break;
     case 'start': {
       const marker = argv.indexOf('--');
       const custom = marker === -1 ? null : argv.slice(marker + 1);
       const agent = valuesAfter(argv, '--agent')[0] ?? 'codex';
-      status = commandStart(argument, { config, agent, command: custom });
+      const owner = valuesAfter(argv, '--owner')[0];
+      const optionArgv = argv.slice(0, marker === -1 ? argv.length : marker);
+      status = await commandStart(argument, { config, agent, command: custom, owner, resources: valuesAfter(optionArgv, '--resource') });
       break;
     }
-    case 'claim': commandClaim(argument, { config, owner: valuesAfter(argv, '--owner')[0], dependsOn: valuesAfter(argv, '--depends-on') }); break;
+    case 'claim': commandClaim(argument, { config, owner: valuesAfter(argv, '--owner')[0], dependsOn: valuesAfter(argv, '--depends-on'), resources: valuesAfter(argv, '--resource') }); break;
     case 'release': commandRelease(argument, { config }); break;
     case 'list': commandList({ config, json: argv.includes('--json') }); break;
     case 'drop': commandDrop(argument, { config }); break;
     case 'doctor': status = commandDoctor({ config }).ok ? 0 : 1; break;
     case 'verify': status = commandVerify({ config }); break;
-    case 'land': commandLand(argument?.startsWith('--') ? null : argument, { config, yes: argv.includes('--yes'), cleanup: !argv.includes('--no-cleanup') }); break;
+    case 'pr': commandPr(argument?.startsWith('--') ? null : argument, { config, draft: argv.includes('--draft'), verify: !argv.includes('--no-verify') }); break;
+    case 'land': commandLand(argument?.startsWith('--') ? null : argument, { config, yes: argv.includes('--yes'), cleanup: !argv.includes('--no-cleanup'), createPr: argv.includes('--create-pr') }); break;
     case 'protect': commandProtect({ config, apply: argv.includes('--apply') }); break;
     case 'hook': commandHook(argument, { config }); break;
     default: console.log(USAGE); status = 1;
