@@ -32,14 +32,18 @@ test('CI runner is a JSON-quoted YAML scalar that extracts to the exact shell co
 });
 
 test('CI matching uses the final runner step when custom setup also ends in verify', () => {
-  const expected = `steps:
+  const expected = `jobs:
+  verify:
+    steps:
       - run: "echo verify"
       - run: "'npx' '--yes' 'copse@0.5.0' verify"
 `;
   const cases = [
     {
       name: 'current JSON-quoted scalar',
-      stale: `steps:
+      stale: `jobs:
+  verify:
+    steps:
       - run: "echo verify"
       - run: "'npx' '--yes' 'copse@0.4.0' verify"
 # consumer-owned customization
@@ -48,12 +52,16 @@ test('CI matching uses the final runner step when custom setup also ends in veri
     },
     {
       name: 'legacy raw scalar',
-      stale: `steps:
+      stale: `jobs:
+  verify:
+    steps:
       - run: "echo verify"
       - run: 'npx' '--yes' 'copse@0.4.0' verify
 # consumer-owned customization
 `,
-      current: `steps:
+      current: `jobs:
+  verify:
+    steps:
       - run: "echo verify"
       - run: 'npx' '--yes' 'copse@0.5.0' verify
 # consumer-owned customization
@@ -65,6 +73,35 @@ test('CI matching uses the final runner step when custom setup also ends in veri
     assert.equal(wiringMatches('.github/workflows/copse.yml', stale, expected), false, `${name} accepted a stale runner`);
     assert.equal(wiringMatches('.github/workflows/copse.yml', current, expected), true, `${name} rejected the exact runner`);
   }
+});
+
+test('CI matching requires the exact final runner command in jobs.verify', () => {
+  const expected = `jobs:
+  verify:
+    steps:
+      - run: "'npx' '--yes' 'copse@0.5.0' verify"
+`;
+  const onlyAnotherJob = `jobs:
+  smoke:
+    steps:
+      - run: "'npx' '--yes' 'copse@0.5.0' verify"
+  verify:
+    steps:
+      - run: "echo no copse here"
+`;
+  const inVerifyJob = `jobs:
+  smoke:
+    steps:
+      - run: "echo smoke"
+  verify:
+    steps:
+      - run: "echo setup"
+      - run: "'npx' '--yes' 'copse@0.5.0' verify"
+      - run: "npm run test:coverage"
+`;
+
+  assert.equal(wiringMatches('.github/workflows/copse.yml', onlyAnotherJob, expected), false);
+  assert.equal(wiringMatches('.github/workflows/copse.yml', inVerifyJob, expected), true);
 });
 
 test('reconcile reports conflicts and apply never overwrites them', () => {
@@ -119,6 +156,44 @@ test('reconcile replaces exact previous copse wiring while preserving consumer h
     assert.equal(readFileSync(join(root, '.github/workflows/copse.yml'), 'utf8'), desired.get('.github/workflows/copse.yml'));
     assert.ok(report.updated.includes('.claude/settings.json'));
     assert.ok(report.updated.includes('.github/workflows/copse.yml'));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('reconcile removes stale Copse groups when old and new groups are both active', () => {
+  const root = mkdtempSync(join(tmpdir(), 'copse-wire-'));
+  try {
+    const oldConfig = { verify: [['npm', 'test']], runner: ['npx', '--yes', 'copse@0.4.0'] };
+    const newConfig = { verify: [['npm', 'test']], runner: ['npx', '--yes', 'copse@0.5.0'] };
+    const previousDesired = desiredWiring(oldConfig);
+    const desired = desiredWiring(newConfig);
+    const oldSettings = JSON.parse(previousDesired.get('.claude/settings.json'));
+    const newSettings = JSON.parse(desired.get('.claude/settings.json'));
+    const consumerStart = { matcher: 'startup', hooks: [{ type: 'command', command: 'consumer start' }] };
+    const consumerTool = { matcher: 'Read', hooks: [{ type: 'command', command: 'consumer read' }] };
+    const initial = {
+      hooks: {
+        SessionStart: [oldSettings.hooks.SessionStart[0], consumerStart, newSettings.hooks.SessionStart[0]],
+        PreToolUse: [oldSettings.hooks.PreToolUse[0], consumerTool, newSettings.hooks.PreToolUse[0]],
+      },
+    };
+    const path = join(root, '.claude', 'settings.json');
+    mkdirSync(join(root, '.claude'), { recursive: true });
+    writeFileSync(path, JSON.stringify(initial, null, 2) + '\n');
+
+    const preview = reconcileWiring(root, new Map([['.claude/settings.json', desired.get('.claude/settings.json')]]), {
+      previousDesired: new Map([['.claude/settings.json', previousDesired.get('.claude/settings.json')]]),
+    });
+    assert.ok(preview.conflicts.includes('.claude/settings.json'));
+    assert.equal(readFileSync(path, 'utf8'), JSON.stringify(initial, null, 2) + '\n');
+
+    const applied = reconcileWiring(root, new Map([['.claude/settings.json', desired.get('.claude/settings.json')]]), {
+      apply: true,
+      previousDesired: new Map([['.claude/settings.json', previousDesired.get('.claude/settings.json')]]),
+    });
+    const settings = JSON.parse(readFileSync(path, 'utf8'));
+    assert.ok(applied.updated.includes('.claude/settings.json'));
+    assert.deepEqual(settings.hooks.SessionStart, [consumerStart, newSettings.hooks.SessionStart[0]]);
+    assert.deepEqual(settings.hooks.PreToolUse, [consumerTool, newSettings.hooks.PreToolUse[0]]);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

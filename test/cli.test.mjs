@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -48,6 +48,42 @@ test('init reports a missing runner package with the normal concise CLI error', 
     assert.equal(result.status, 1);
     assert.match(result.stderr, /^\n✗ --runner-package requires a value\n\n$/);
     assert.doesNotMatch(result.stderr, /Error:|at ModuleJob|src\/cli\.mjs:/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('init ignores apply and CI flags after the option marker', () => {
+  const { root, repo } = makeRepo();
+  try {
+    const result = runCli(['init', '--', '--ci', 'custom', '--apply'], repo);
+
+    assert.equal(result.status, 1);
+    assert.equal(existsSync(join(repo, '.copse', 'hooks', 'pre-commit')), false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('init ignores a post-marker CI mode when apply is before the marker', () => {
+  const { root, repo } = makeRepo();
+  try {
+    writeFileSync(join(repo, 'package.json'), JSON.stringify({ scripts: { test: 'node --test' } }));
+
+    const result = runCli(['init', '--apply', '--', '--ci', 'none'], repo);
+    const workflow = readFileSync(join(repo, '.github', 'workflows', 'copse.yml'), 'utf8');
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(workflow, /- run: "npm install"/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('init honors apply and CI flags before the option marker', () => {
+  const { root, repo } = makeRepo();
+  try {
+    writeFileSync(join(repo, 'package.json'), JSON.stringify({ scripts: { test: 'node --test' } }));
+
+    const result = runCli(['init', '--ci', 'none', '--apply', '--', '--ci', 'custom'], repo);
+    const workflow = readFileSync(join(repo, '.github', 'workflows', 'copse.yml'), 'utf8');
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.doesNotMatch(workflow, /npm install/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

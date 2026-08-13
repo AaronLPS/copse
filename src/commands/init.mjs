@@ -5,6 +5,7 @@ import { CONFIG_FILENAME, parseConfig } from '../config.mjs';
 import { git, worktreeRoot } from '../git.mjs';
 import {
   COPSE_HOOKS_PATH, desiredGitHooks, hookMigration, legacyGitHooks,
+  hooksPathPointsToCopse,
 } from '../git-hooks.mjs';
 import { configWithRunner, runnerForPackage } from '../runner.mjs';
 import { desiredWiring, detectCiMode, reconcileWiring } from '../wiring.mjs';
@@ -27,7 +28,8 @@ export function commandInit({ cwd = process.cwd(), config, apply = false, runner
     cwd: repoDir, allowFailure: true,
   });
   const hooksScope = hooksScopeLine?.match(/^(\S+)/)?.[1] ?? null;
-  const worktreeHooksOverride = hooksScope === 'worktree' && currentHooksRaw !== COPSE_HOOKS_PATH;
+  const worktreeHooksOverride = hooksScope === 'worktree'
+    && !hooksPathPointsToCopse({ hooksPath: currentHooksPath, root: repoDir });
   const recordedPrevious = git(['config', '--local', '--get', 'copse.previousHooksPath'], {
     cwd: repoDir, allowFailure: true,
   });
@@ -36,7 +38,7 @@ export function commandInit({ cwd = process.cwd(), config, apply = false, runner
     const path = join(repoDir, relative);
     return existsSync(path) && readFileSync(path, 'utf8') === expected;
   });
-  const migration = hookMigration({ currentHooksPath, recordedPrevious, legacyCopse });
+  const migration = hookMigration({ currentHooksPath, recordedPrevious, legacyCopse, root: repoDir });
   let effective = config;
   if (config.ciMode === 'auto') effective = { ...effective, ciMode: detectCiMode(repoDir) };
   if (config.verify.length === 0 && existsSync(join(repoDir, 'package.json'))) {

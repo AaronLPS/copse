@@ -13,8 +13,10 @@ import {
 } from '../git.mjs';
 import { driftNote } from '../decisions.mjs';
 import { CONFIG_FILENAME } from '../config.mjs';
-import { COPSE_HOOKS_PATH, desiredGitHooks, resolveDelegatedHook } from '../git-hooks.mjs';
-import { desiredWiring, wiringMatches } from '../wiring.mjs';
+import {
+  COPSE_HOOKS_PATH, desiredGitHooks, hooksPathPointsToCopse, resolveDelegatedHook,
+} from '../git-hooks.mjs';
+import { desiredWiring, gitHookFileState, wiringMatches } from '../wiring.mjs';
 import { coordinationStatePath, loadCoordination } from '../coordination.mjs';
 import { inspectListeningPort } from '../process.mjs';
 
@@ -69,17 +71,29 @@ export function commandDoctor({ cwd = process.cwd(), config, inspectPort = inspe
       else if (!wiringMatches(relative, readFileSync(path, 'utf8'), expected)) findings.push(`copse wiring differs: ${relative}`);
     }
     const hooksPath = git(['config', '--get', 'core.hooksPath'], { cwd: wiringRoot, allowFailure: true });
-    if (hooksPath !== COPSE_HOOKS_PATH) findings.push(`git core.hooksPath is not ${COPSE_HOOKS_PATH}`);
+    const expandedHooksPath = git(['config', '--path', '--get', 'core.hooksPath'], {
+      cwd: wiringRoot, allowFailure: true,
+    });
+    const usesCopseHooks = hooksPathPointsToCopse({ hooksPath: expandedHooksPath, root: wiringRoot });
+    if (!usesCopseHooks) findings.push(`git core.hooksPath is not ${COPSE_HOOKS_PATH}`);
     const hooksScopeLine = git(['config', '--show-scope', '--get', 'core.hooksPath'], {
       cwd: wiringRoot, allowFailure: true,
     });
     const hooksScope = hooksScopeLine?.match(/^(\S+)/)?.[1] ?? null;
-    if (hooksScope === 'worktree' && hooksPath !== COPSE_HOOKS_PATH) {
+    if (hooksScope === 'worktree' && !usesCopseHooks) {
       findings.push('worktree core.hooksPath overrides clone-local hook wiring');
     }
-    for (const relative of desiredGitHooks(config).keys()) {
+    for (const [relative, expected] of desiredGitHooks(config)) {
       const path = join(wiringRoot, relative);
-      if (!existsSync(path)) continue;
+      const state = gitHookFileState(wiringRoot, relative);
+      if (!state.exists) {
+        findings.push(`missing copse wiring: ${relative}`);
+        continue;
+      }
+      if (!state.safe || readFileSync(path, 'utf8') !== expected) {
+        findings.push(`copse wiring differs: ${relative}`);
+        continue;
+      }
       try {
         accessSync(path, constants.X_OK);
       } catch {

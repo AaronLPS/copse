@@ -59,10 +59,12 @@ try {
     case 'init': {
       const marker = argv.indexOf('--');
       const initArgv = marker === -1 ? argv : argv.slice(0, marker);
-      const ciMode = valuesAfter(argv, '--ci')[0];
+      const ciMode = valuesAfter(initArgv, '--ci')[0];
       const initConfig = ciMode ? { ...config, ciMode } : config;
       const runnerPackage = runnerPackageFromArgv(initArgv);
-      status = commandInit({ config: initConfig, apply: argv.includes('--apply'), runnerPackage }).ok ? 0 : 1;
+      status = commandInit({
+        config: initConfig, apply: initArgv.includes('--apply'), runnerPackage,
+      }).ok ? 0 : 1;
       break;
     }
     case 'new': commandNew(argument, { config }); break;

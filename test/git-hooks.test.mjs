@@ -52,6 +52,29 @@ test('delegated paths resolve without cycles', () => {
   }), /cycle/);
 });
 
+test('equivalent and physical aliases of .copse/hooks are delegation cycles', () => {
+  const root = mkdtempSync(join(tmpdir(), 'copse-hook-cycle-'));
+  try {
+    mkdirSync(join(root, '.copse', 'hooks'), { recursive: true });
+    symlinkSync(join(root, '.copse', 'hooks'), join(root, '.hook-alias'));
+    const variants = [
+      './.copse/hooks',
+      '.copse/../.copse/hooks',
+      join(root, '.copse', 'hooks'),
+      '.hook-alias',
+    ];
+
+    for (const previous of variants) {
+      assert.throws(() => resolveDelegatedHook({
+        previous, event: 'pre-commit', root, commonDir: join(root, '.git'),
+      }), /cycle/, previous);
+      assert.equal(hookMigration({
+        currentHooksPath: previous, recordedPrevious: null, legacyCopse: false, root,
+      }).previous, DEFAULT_HOOKS_SENTINEL, previous);
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('legacy renderer preserves the v0.3 forwards for migration matching', () => {
   assert.deepEqual([...legacyGitHooks(config)], [
     ['.githooks/pre-commit', "#!/bin/sh\ncd \"$(git rev-parse --show-toplevel)\" || exit 1\nexec 'npx' '--yes' 'github:owner/repo#abc' hook pre-commit \"$@\"\n"],
