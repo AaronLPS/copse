@@ -17,14 +17,22 @@ function writeConfig(path, content) {
 
 export function commandInit({ cwd = process.cwd(), config, apply = false, runnerPackage = null }) {
   const repoDir = worktreeRoot({ cwd });
-  const currentHooksPath = git(['config', '--local', '--get', 'core.hooksPath'], {
+  const currentHooksRaw = git(['config', '--get', 'core.hooksPath'], {
     cwd: repoDir, allowFailure: true,
   });
+  const currentHooksPath = git(['config', '--path', '--get', 'core.hooksPath'], {
+    cwd: repoDir, allowFailure: true,
+  });
+  const hooksScopeLine = git(['config', '--show-scope', '--get', 'core.hooksPath'], {
+    cwd: repoDir, allowFailure: true,
+  });
+  const hooksScope = hooksScopeLine?.match(/^(\S+)/)?.[1] ?? null;
+  const worktreeHooksOverride = hooksScope === 'worktree' && currentHooksRaw !== COPSE_HOOKS_PATH;
   const recordedPrevious = git(['config', '--local', '--get', 'copse.previousHooksPath'], {
     cwd: repoDir, allowFailure: true,
   });
   const legacy = legacyGitHooks(config);
-  const legacyCopse = currentHooksPath === '.githooks' && [...legacy].every(([relative, expected]) => {
+  const legacyCopse = currentHooksRaw === '.githooks' && [...legacy].every(([relative, expected]) => {
     const path = join(repoDir, relative);
     return existsSync(path) && readFileSync(path, 'utf8') === expected;
   });
@@ -68,10 +76,14 @@ export function commandInit({ cwd = process.cwd(), config, apply = false, runner
   });
   const report = Object.fromEntries(
     ['missing', 'matching', 'conflicts', 'created', 'updated'].map((key) => [
-      key, [...genericReport[key], ...hookReport[key]],
+      key, [
+        ...genericReport[key],
+        ...hookReport[key],
+        ...(key === 'conflicts' && worktreeHooksOverride ? ['worktree core.hooksPath override'] : []),
+      ],
     ]),
   );
-  if (apply && genericReport.conflicts.length === 0 && hookReport.conflicts.length === 0) {
+  if (apply && report.conflicts.length === 0) {
     git(['config', '--local', 'copse.previousHooksPath', migration.previous], { cwd: repoDir });
     git(['config', '--local', 'core.hooksPath', COPSE_HOOKS_PATH], { cwd: repoDir });
   }

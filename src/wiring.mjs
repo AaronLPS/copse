@@ -1,4 +1,6 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import {
+  accessSync, chmodSync, constants, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 
 export function detectCiMode(root) {
@@ -71,6 +73,17 @@ function agentSettingsPath(relative) {
   return relative === '.codex/hooks.json' || relative === '.claude/settings.json';
 }
 
+function gitHookPath(relative) { return relative.startsWith('.copse/hooks/'); }
+
+function executable(path) {
+  try {
+    accessSync(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function parseJson(text) { try { return JSON.parse(text); } catch { return null; } }
 
 function includesGroup(groups, wanted) {
@@ -137,7 +150,14 @@ export function reconcileWiring(root, desired, { apply = false, previousDesired 
     } else {
       const actual = readFileSync(path, 'utf8');
       const previous = previousDesired?.get(relative);
-      if (wiringMatches(relative, actual, content)) report.matching.push(relative);
+      if (wiringMatches(relative, actual, content)) {
+        if (gitHookPath(relative) && !executable(path)) {
+          if (apply) {
+            chmodSync(path, 0o755);
+            report.updated.push(relative);
+          } else report.conflicts.push(relative);
+        } else report.matching.push(relative);
+      }
       else if (apply && previous === actual) {
         atomicWrite(path, content);
         if (relative.startsWith('.copse/hooks/')) chmodSync(path, 0o755);

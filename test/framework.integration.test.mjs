@@ -149,6 +149,55 @@ test('a wrapper conflict leaves the configured hooksPath unchanged', () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test('init refuses a linked worktree core.hooksPath override and doctor diagnoses it', () => {
+  const { root, repo } = makeRepo();
+  try {
+    run(['config', 'extensions.worktreeConfig', 'true'], repo);
+    const linked = join(root, 'project-feat-worktree-hooks');
+    run(['worktree', 'add', '-b', 'feat/worktree-hooks', linked], repo);
+    mkdirSync(join(linked, '.husky'));
+    run(['config', '--worktree', 'core.hooksPath', '.husky'], linked);
+    const config = parseConfig({ verify: [['npm', 'test']] }).config;
+
+    const result = commandInit({ cwd: linked, config, apply: true });
+    const findings = commandDoctor({ cwd: linked, config }).findings.join('\n');
+
+    assert.equal(result.ok, false);
+    assert.ok(result.conflicts.includes('worktree core.hooksPath override'));
+    assert.equal(run(['config', '--get', 'core.hooksPath'], linked), '.husky');
+    assert.match(findings, /worktree core\.hooksPath overrides clone-local hook wiring/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('init expands a tilde hooksPath before storing and delegating it', () => {
+  const { root, repo } = makeRepo();
+  const originalHome = process.env.HOME;
+  try {
+    const fakeHome = join(root, 'home');
+    const hookDir = join(fakeHome, 'consumer-hooks');
+    mkdirSync(hookDir, { recursive: true });
+    const original = '#!/bin/sh\nprintf tilde > .tilde-hook\n';
+    writeFileSync(join(hookDir, 'pre-commit'), original, { mode: 0o755 });
+    process.env.HOME = fakeHome;
+    run(['config', 'core.hooksPath', '~/consumer-hooks'], repo);
+    const config = parseConfig({
+      verify: [['npm', 'test']], runner: [process.execPath, resolve('src/cli.mjs')],
+    }).config;
+
+    commandInit({ cwd: repo, config, apply: true });
+
+    assert.equal(run(['config', '--get', 'copse.previousHooksPath'], repo), hookDir);
+    assert.equal(readFileSync(join(hookDir, 'pre-commit'), 'utf8'), original);
+    run(['switch', '-c', 'feat/tilde-hook'], repo);
+    run(['commit', '--allow-empty', '-m', 'delegates tilde'], repo);
+    assert.equal(readFileSync(join(repo, '.tilde-hook'), 'utf8'), 'tilde');
+  } finally {
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('init runner package creates a config when one is absent', () => {
   const { root, repo } = makeRepo();
   try {
@@ -407,6 +456,23 @@ test('doctor accepts an existing delegated directory with no hook files', () => 
     const result = commandDoctor({ cwd: repo, config });
 
     assert.equal(result.ok, true);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('doctor reports a non-executable Copse wrapper and init repairs its mode', () => {
+  const { root, repo } = makeRepo();
+  try {
+    const config = parseConfig({ verify: [['npm', 'test']] }).config;
+    commandInit({ cwd: repo, config, apply: true });
+    const wrapper = join(repo, '.copse', 'hooks', 'pre-commit');
+    chmodSync(wrapper, 0o644);
+
+    const broken = commandDoctor({ cwd: repo, config });
+    assert.match(broken.findings.join('\n'), /copse hook is not executable: \.copse\/hooks\/pre-commit/);
+
+    const repaired = commandInit({ cwd: repo, config, apply: true });
+    assert.ok(repaired.updated.includes('.copse/hooks/pre-commit'));
+    assert.equal(commandDoctor({ cwd: repo, config }).ok, true);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

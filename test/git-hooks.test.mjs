@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, statSync } from 'node:fs';
+import { chmodSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -63,5 +63,21 @@ test('reconciliation marks newly rendered Git wrappers executable', () => {
     reconcileWiring(root, desiredGitHooks(config), { apply: true });
     assert.equal(statSync(join(root, '.copse/hooks/pre-commit')).mode & 0o777, 0o755);
     assert.equal(statSync(join(root, '.copse/hooks/pre-push')).mode & 0o777, 0o755);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('reconciliation repairs exact Copse wrappers that lost execute mode', () => {
+  const root = mkdtempSync(join(tmpdir(), 'copse-hooks-'));
+  try {
+    const desired = desiredGitHooks(config);
+    reconcileWiring(root, desired, { apply: true });
+    for (const relative of desired.keys()) chmodSync(join(root, relative), 0o644);
+
+    const report = reconcileWiring(root, desired, { apply: true });
+
+    assert.deepEqual(report.updated, [...desired.keys()]);
+    for (const relative of desired.keys()) {
+      assert.equal(statSync(join(root, relative)).mode & 0o111, 0o111);
+    }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

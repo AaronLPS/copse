@@ -13,7 +13,7 @@ import {
 } from '../git.mjs';
 import { driftNote } from '../decisions.mjs';
 import { CONFIG_FILENAME } from '../config.mjs';
-import { COPSE_HOOKS_PATH, resolveDelegatedHook } from '../git-hooks.mjs';
+import { COPSE_HOOKS_PATH, desiredGitHooks, resolveDelegatedHook } from '../git-hooks.mjs';
 import { desiredWiring, wiringMatches } from '../wiring.mjs';
 import { coordinationStatePath, loadCoordination } from '../coordination.mjs';
 import { inspectListeningPort } from '../process.mjs';
@@ -68,8 +68,24 @@ export function commandDoctor({ cwd = process.cwd(), config, inspectPort = inspe
       if (!existsSync(path)) findings.push(`missing copse wiring: ${relative}`);
       else if (!wiringMatches(relative, readFileSync(path, 'utf8'), expected)) findings.push(`copse wiring differs: ${relative}`);
     }
-    const hooksPath = git(['config', '--local', '--get', 'core.hooksPath'], { cwd: wiringRoot, allowFailure: true });
+    const hooksPath = git(['config', '--get', 'core.hooksPath'], { cwd: wiringRoot, allowFailure: true });
     if (hooksPath !== COPSE_HOOKS_PATH) findings.push(`git core.hooksPath is not ${COPSE_HOOKS_PATH}`);
+    const hooksScopeLine = git(['config', '--show-scope', '--get', 'core.hooksPath'], {
+      cwd: wiringRoot, allowFailure: true,
+    });
+    const hooksScope = hooksScopeLine?.match(/^(\S+)/)?.[1] ?? null;
+    if (hooksScope === 'worktree' && hooksPath !== COPSE_HOOKS_PATH) {
+      findings.push('worktree core.hooksPath overrides clone-local hook wiring');
+    }
+    for (const relative of desiredGitHooks(config).keys()) {
+      const path = join(wiringRoot, relative);
+      if (!existsSync(path)) continue;
+      try {
+        accessSync(path, constants.X_OK);
+      } catch {
+        findings.push(`copse hook is not executable: ${relative}`);
+      }
+    }
     const previous = git(['config', '--local', '--get', 'copse.previousHooksPath'], {
       cwd: wiringRoot, allowFailure: true,
     });
