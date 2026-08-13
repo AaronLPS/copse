@@ -3,6 +3,9 @@ import { join } from 'node:path';
 
 import { CONFIG_FILENAME, parseConfig } from '../config.mjs';
 import { git, worktreeRoot } from '../git.mjs';
+import {
+  COPSE_HOOKS_PATH, desiredGitHooks, hookMigration, legacyGitHooks,
+} from '../git-hooks.mjs';
 import { configWithRunner, runnerForPackage } from '../runner.mjs';
 import { desiredWiring, detectCiMode, reconcileWiring } from '../wiring.mjs';
 
@@ -14,6 +17,18 @@ function writeConfig(path, content) {
 
 export function commandInit({ cwd = process.cwd(), config, apply = false, runnerPackage = null }) {
   const repoDir = worktreeRoot({ cwd });
+  const currentHooksPath = git(['config', '--local', '--get', 'core.hooksPath'], {
+    cwd: repoDir, allowFailure: true,
+  });
+  const recordedPrevious = git(['config', '--local', '--get', 'copse.previousHooksPath'], {
+    cwd: repoDir, allowFailure: true,
+  });
+  const legacy = legacyGitHooks(config);
+  const legacyCopse = currentHooksPath === '.githooks' && [...legacy].every(([relative, expected]) => {
+    const path = join(repoDir, relative);
+    return existsSync(path) && readFileSync(path, 'utf8') === expected;
+  });
+  const migration = hookMigration({ currentHooksPath, recordedPrevious, legacyCopse });
   let effective = config;
   if (config.ciMode === 'auto') effective = { ...effective, ciMode: detectCiMode(repoDir) };
   if (config.verify.length === 0 && existsSync(join(repoDir, 'package.json'))) {
@@ -25,6 +40,7 @@ export function commandInit({ cwd = process.cwd(), config, apply = false, runner
   const configPath = join(repoDir, CONFIG_FILENAME);
   const raw = existsSync(configPath) ? JSON.parse(readFileSync(configPath, 'utf8')) : null;
   const previousDesired = desiredWiring(effective);
+  const previousGitHooks = desiredGitHooks(effective);
   const requestedRunner = runnerPackage ? runnerForPackage(runnerPackage) : null;
   const rawWithInvocationOverrides = raw ? { ...raw, ciMode: config.ciMode } : effective;
   const requestedRaw = requestedRunner
@@ -46,8 +62,19 @@ export function commandInit({ cwd = process.cwd(), config, apply = false, runner
     const saved = raw && configChanged ? requestedRaw : effective;
     writeConfig(configPath, JSON.stringify(saved, null, 2) + '\n');
   }
-  const report = reconcileWiring(repoDir, desiredWiring(effective), { apply, previousDesired });
-  if (apply) git(['config', 'core.hooksPath', '.githooks'], { cwd: repoDir });
+  const genericReport = reconcileWiring(repoDir, desiredWiring(effective), { apply, previousDesired });
+  const hookReport = reconcileWiring(repoDir, desiredGitHooks(effective), {
+    apply, previousDesired: previousGitHooks,
+  });
+  const report = Object.fromEntries(
+    ['missing', 'matching', 'conflicts', 'created', 'updated'].map((key) => [
+      key, [...genericReport[key], ...hookReport[key]],
+    ]),
+  );
+  if (apply && genericReport.conflicts.length === 0 && hookReport.conflicts.length === 0) {
+    git(['config', '--local', 'copse.previousHooksPath', migration.previous], { cwd: repoDir });
+    git(['config', '--local', 'core.hooksPath', COPSE_HOOKS_PATH], { cwd: repoDir });
+  }
   for (const path of report.created) console.log(`  ✓ created ${path}`);
   for (const path of report.updated) console.log(`  ✓ updated ${path}`);
   for (const path of report.missing.filter((p) => !report.created.includes(p))) console.log(`  · missing ${path}`);

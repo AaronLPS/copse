@@ -6,11 +6,14 @@
  * in one pass and exits non-zero if any are present.
  */
 import { accessSync, constants, existsSync, readFileSync } from 'node:fs';
-import { isAbsolute, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 
-import { carryPathState, git, mainWorktree, worktreeRoot, worktrees } from '../git.mjs';
+import {
+  carryPathState, git, gitCommonDir, mainWorktree, worktreeRoot, worktrees,
+} from '../git.mjs';
 import { driftNote } from '../decisions.mjs';
 import { CONFIG_FILENAME } from '../config.mjs';
+import { COPSE_HOOKS_PATH, resolveDelegatedHook } from '../git-hooks.mjs';
 import { desiredWiring, wiringMatches } from '../wiring.mjs';
 import { coordinationStatePath, loadCoordination } from '../coordination.mjs';
 import { inspectListeningPort } from '../process.mjs';
@@ -66,7 +69,37 @@ export function commandDoctor({ cwd = process.cwd(), config, inspectPort = inspe
       else if (!wiringMatches(relative, readFileSync(path, 'utf8'), expected)) findings.push(`copse wiring differs: ${relative}`);
     }
     const hooksPath = git(['config', '--local', '--get', 'core.hooksPath'], { cwd: wiringRoot, allowFailure: true });
-    if (hooksPath !== '.githooks') findings.push('git core.hooksPath is not .githooks');
+    if (hooksPath !== COPSE_HOOKS_PATH) findings.push(`git core.hooksPath is not ${COPSE_HOOKS_PATH}`);
+    const previous = git(['config', '--local', '--get', 'copse.previousHooksPath'], {
+      cwd: wiringRoot, allowFailure: true,
+    });
+    if (previous) {
+      const commonDir = gitCommonDir({ cwd: wiringRoot });
+      let delegated = null;
+      try {
+        delegated = ['pre-commit', 'pre-push'].map((event) => ({
+          event,
+          path: resolveDelegatedHook({ previous, event, root: wiringRoot, commonDir }),
+        }));
+      } catch (error) {
+        findings.push(`git hook delegation cycle: ${error.message}`);
+      }
+      if (delegated) {
+        const delegatedDir = dirname(delegated[0].path);
+        if (!existsSync(delegatedDir)) {
+          findings.push(`delegated hook directory does not exist: ${previous}`);
+        } else {
+          for (const { event, path } of delegated) {
+            if (!existsSync(path)) continue;
+            try {
+              accessSync(path, constants.X_OK);
+            } catch {
+              findings.push(`delegated ${event} is not executable`);
+            }
+          }
+        }
+      }
+    }
     const runner = config.runner?.[0];
     if (runner?.includes('/') || isAbsolute(runner ?? '')) {
       const runnerPath = isAbsolute(runner) ? runner : resolve(wiringRoot, runner);
