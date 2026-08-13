@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -84,4 +84,52 @@ test('live agent smoke completes two overlapping packed fake sessions', {
 
   assert.equal(result.status, 0, result.stderr || result.error?.message);
   assert.match(result.stdout, /live agent acceptance ok/);
+});
+
+test('live agent smoke tears down later supervisors after an earlier teardown failure', {
+  skip: process.env.COPSE_LIVE_FAKE_TEST !== '1' || process.platform === 'win32',
+}, () => {
+  const temp = mkdtempSync(join(tmpdir(), 'copse-live-cleanup-'));
+  const startedPath = join(temp, 'second-started');
+  const cleanedPath = join(temp, 'second-cleaned');
+  const supervisorPidPath = join(temp, 'second-supervisor.pid');
+  const parentPidExpression = `Number(require('node:child_process').execFileSync('ps', ['-o', 'ppid=', '-p', String(pid)], { encoding: 'utf8' }).trim())`;
+  const firstCommand = JSON.stringify([
+    process.execPath,
+    '-e',
+    `const fs=require('node:fs'); let pid=process.pid; for(let i=0;i<3;i++) pid=${parentPidExpression}; const started=process.argv[1]; const wait=()=>{ if(fs.existsSync(started)){ process.kill(pid, 'SIGKILL'); process.exit(0); } setTimeout(wait, 10); }; wait();`,
+    startedPath,
+  ]);
+  const secondCommand = JSON.stringify([
+    process.execPath,
+    '-e',
+    `const fs=require('node:fs'); let pid=process.pid; for(let i=0;i<3;i++) pid=${parentPidExpression}; fs.writeFileSync(process.argv[3], String(pid)); process.on('SIGTERM', ()=>fs.writeFileSync(process.argv[2], 'cleaned')); fs.writeFileSync(process.argv[1], 'started'); setInterval(()=>{}, 1000);`,
+    startedPath,
+    cleanedPath,
+    supervisorPidPath,
+  ]);
+
+  try {
+    const result = spawnSync(process.execPath, ['scripts/live-agent-smoke.mjs'], {
+      cwd: root,
+      encoding: 'utf8',
+      timeout: 10_000,
+      env: {
+        ...process.env,
+        COPSE_LIVE_AGENT_TEST: '1',
+        COPSE_CODEX_COMMAND: firstCommand,
+        COPSE_CLAUDE_COMMAND: secondCommand,
+      },
+    });
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Codex supervisor exited before owned-tree teardown/);
+    assert.equal(existsSync(cleanedPath), true, result.stderr || result.error?.message);
+  } finally {
+    if (existsSync(supervisorPidPath)) {
+      const supervisorPid = Number(readFileSync(supervisorPidPath, 'utf8'));
+      try { process.kill(-supervisorPid, 'SIGKILL'); } catch {}
+    }
+    rmSync(temp, { recursive: true, force: true });
+  }
 });

@@ -168,44 +168,52 @@ function outcomeWithin(record, timeoutMs) {
 }
 
 async function stopSupervisors(records) {
+  const failures = [];
   for (const record of records) {
-    refreshSupervisor(record);
-    if (record.completed?.error && !record.child.pid) continue;
-    if (record.completed || !pidIsAlive(record.child.pid)) {
-      throw new Error(
-        `${record.label} supervisor exited before owned-tree teardown; refusing a stale PID/group target`,
+    try {
+      refreshSupervisor(record);
+      if (record.completed?.error && !record.child.pid) continue;
+      if (record.completed || !pidIsAlive(record.child.pid)) {
+        throw new Error(
+          `${record.label} supervisor exited before owned-tree teardown; refusing a stale PID/group target`,
+        );
+      }
+
+      if (process.platform === 'win32') {
+        try {
+          execFileSync('taskkill', ['/PID', String(record.child.pid), '/T', '/F'], {
+            stdio: 'ignore',
+            timeout: CHILD_EXIT_TIMEOUT_MS,
+          });
+        } catch (error) {
+          throw new Error(`taskkill could not terminate ${record.label} supervisor tree: ${error.message}`);
+        }
+        if (!await outcomeWithin(record, CHILD_EXIT_TIMEOUT_MS) || pidIsAlive(record.child.pid)) {
+          throw new Error(`could not prove ${record.label} supervisor tree exited`);
+        }
+        continue;
+      }
+
+      process.kill(-record.child.pid, 'SIGTERM');
+      await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+      if (record.completed || !pidIsAlive(record.child.pid)) {
+        throw new Error(`${record.label} supervisor did not retain its process group through graceful teardown`);
+      }
+      process.kill(-record.child.pid, 'SIGKILL');
+      if (!await outcomeWithin(record, CHILD_EXIT_TIMEOUT_MS)) {
+        throw new Error(`${record.label} supervisor did not exit after owned-group SIGKILL`);
+      }
+      await waitFor(
+        () => !processGroupIsAlive(record.child.pid),
+        `${record.label} process group teardown`,
+        { timeoutMs: CHILD_EXIT_TIMEOUT_MS },
       );
+    } catch (error) {
+      failures.push(error);
     }
-
-    if (process.platform === 'win32') {
-      try {
-        execFileSync('taskkill', ['/PID', String(record.child.pid), '/T', '/F'], {
-          stdio: 'ignore',
-          timeout: CHILD_EXIT_TIMEOUT_MS,
-        });
-      } catch (error) {
-        throw new Error(`taskkill could not terminate ${record.label} supervisor tree: ${error.message}`);
-      }
-      if (!await outcomeWithin(record, CHILD_EXIT_TIMEOUT_MS) || pidIsAlive(record.child.pid)) {
-        throw new Error(`could not prove ${record.label} supervisor tree exited`);
-      }
-      continue;
-    }
-
-    process.kill(-record.child.pid, 'SIGTERM');
-    await new Promise((resolveWait) => setTimeout(resolveWait, 100));
-    if (record.completed || !pidIsAlive(record.child.pid)) {
-      throw new Error(`${record.label} supervisor did not retain its process group through graceful teardown`);
-    }
-    process.kill(-record.child.pid, 'SIGKILL');
-    if (!await outcomeWithin(record, CHILD_EXIT_TIMEOUT_MS)) {
-      throw new Error(`${record.label} supervisor did not exit after owned-group SIGKILL`);
-    }
-    await waitFor(
-      () => !processGroupIsAlive(record.child.pid),
-      `${record.label} process group teardown`,
-      { timeoutMs: CHILD_EXIT_TIMEOUT_MS },
-    );
+  }
+  if (failures.length > 0) {
+    throw new AggregateError(failures, failures.map((error) => error.message).join('\n'));
   }
 }
 
