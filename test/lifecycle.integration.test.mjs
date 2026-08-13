@@ -296,6 +296,57 @@ test('drop rescues a carried directory this worktree holds the only copy of', ()
   }
 });
 
+test('new refuses a symlink nested inside a carried directory', () => {
+  const dirConfig = parseConfig({ baseBranch: 'devel', carryDirs: ['data'], install: null }).config;
+  const { root, repo } = makeRepo();
+  try {
+    writeFileSync(join(repo, '.gitignore'), '.env.test\ndata/\n');
+    run('git', ['add', '-A'], repo);
+    run('git', ['commit', '-m', 'ignore data'], repo);
+    run('git', ['push', 'origin', 'devel'], repo);
+    const outside = join(root, 'outside-nested-source');
+    mkdirSync(outside);
+    mkdirSync(join(repo, 'data'));
+    symlinkSync(outside, join(repo, 'data', 'escape'));
+
+    assert.throws(
+      () => commandNew('feat/x', { cwd: repo, config: dirConfig }),
+      (error) => error instanceof CopseError && /data\/escape/.test(error.message) && /nested symlink/.test(error.message),
+    );
+    assert.ok(!existsSync(join(root, 'proj-feat-x', 'data', 'escape')));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('drop refuses to rescue a carried directory containing a nested symlink', () => {
+  const dirConfig = parseConfig({ baseBranch: 'devel', carryDirs: ['data'], install: null }).config;
+  const { root, repo } = makeRepo();
+  try {
+    writeFileSync(join(repo, '.gitignore'), '.env.test\ndata/\n');
+    run('git', ['add', '-A'], repo);
+    run('git', ['commit', '-m', 'ignore data'], repo);
+    run('git', ['push', 'origin', 'devel'], repo);
+    mkdirSync(join(repo, 'data'));
+    writeFileSync(join(repo, 'data', 'note.txt'), 'safe\n');
+    commandNew('feat/x', { cwd: repo, config: dirConfig });
+    const target = join(root, 'proj-feat-x');
+    rmSync(join(repo, 'data'), { recursive: true, force: true });
+    const outside = join(root, 'outside-nested-rescue');
+    mkdirSync(outside);
+    symlinkSync(outside, join(target, 'data', 'escape'));
+
+    assert.throws(
+      () => commandDrop('feat/x', { cwd: repo, config: dirConfig }),
+      (error) => error instanceof CopseError && /data\/escape/.test(error.message) && /nested symlink/.test(error.message),
+    );
+    assert.ok(existsSync(target), 'the unsafe worktree remains intact');
+    assert.ok(!existsSync(join(repo, 'data')), 'nothing was rescued before refusal');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('drop from a prefix-colliding sibling worktree is not blocked as "currently in this worktree"', () => {
   // Task 7's review found that isCurrent used a bare startsWith on raw paths,
   // so `<repo>-feat-x2` (cwd) counted as "inside" `<repo>-feat-x` (the

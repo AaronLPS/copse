@@ -2,18 +2,21 @@
  * Whether copse is still wired into this repository, and whether what the
  * config declares still matches what is on disk.
  *
- * This plan's scope is the worktree layer only. Later plans add the hook,
- * workflow and ruleset checks; the shape — collect findings, return them all,
- * exit non-zero if any — is set here.
+ * Collects worktree, carried-path, generated-forward, hook-path and CI findings
+ * in one pass and exits non-zero if any are present.
  */
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { carryPathState, mainWorktree, worktrees } from '../git.mjs';
+import { carryPathState, git, mainWorktree, worktreeRoot, worktrees } from '../git.mjs';
 import { driftNote } from '../decisions.mjs';
+import { CONFIG_FILENAME } from '../config.mjs';
+import { desiredWiring, wiringMatches } from '../wiring.mjs';
 
 export function commandDoctor({ cwd = process.cwd(), config }) {
   const findings = [];
   const repoDir = mainWorktree({ cwd }).path;
+  const wiringRoot = worktreeRoot({ cwd });
 
   // A declared file that is not in the main worktree cannot be carried, and
   // that failure surfaces later, inside a worktree, as a missing variable.
@@ -37,6 +40,16 @@ export function commandDoctor({ cwd = process.cwd(), config }) {
   for (const entry of worktrees({ cwd })) {
     const note = driftNote(entry, config, { repoDir });
     if (note !== null) findings.push(`${entry.path}: ${note.replace(/^⚠ /, '')}`);
+  }
+
+  if (existsSync(join(wiringRoot, CONFIG_FILENAME))) {
+    for (const [relative, expected] of desiredWiring(config)) {
+      const path = join(wiringRoot, relative);
+      if (!existsSync(path)) findings.push(`missing copse wiring: ${relative}`);
+      else if (!wiringMatches(relative, readFileSync(path, 'utf8'), expected)) findings.push(`copse wiring differs: ${relative}`);
+    }
+    const hooksPath = git(['config', '--local', '--get', 'core.hooksPath'], { cwd: wiringRoot, allowFailure: true });
+    if (hooksPath !== '.githooks') findings.push('git core.hooksPath is not .githooks');
   }
 
   console.log('');

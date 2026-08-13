@@ -17,6 +17,7 @@ import {
   escapingAncestor,
   git,
   mainWorktree,
+  nestedSymlinks,
   worktrees,
 } from '../git.mjs';
 import { directoryFor, parseBranchName } from '../naming.mjs';
@@ -75,7 +76,7 @@ export function commandNew(branch, { cwd = process.cwd(), config }) {
   // collected and reported together rather than aborting the loop on the
   // first one, so one bad carry path does not hide the rest.
   const refused = [];
-  function copyCarryPath(rel, copy) {
+  function copyCarryPath(rel, copy, { directory = false } = {}) {
     const from = join(repoDir, rel);
     const sourceEscape = escapingAncestor(repoDir, rel);
     if (sourceEscape) {
@@ -106,6 +107,18 @@ export function commandNew(branch, { cwd = process.cwd(), config }) {
       return;
     }
 
+    if (directory) {
+      const sourceLinks = nestedSymlinks(from);
+      const destinationLinks = destState === 'present' ? nestedSymlinks(to) : [];
+      for (const nested of sourceLinks) {
+        refused.push(`${rel}/${nested} (a nested symlink in ${repoDir}; refused rather than copied)`);
+      }
+      for (const nested of destinationLinks) {
+        refused.push(`${rel}/${nested} (a nested symlink already checked out in ${target}; refused rather than overwritten)`);
+      }
+      if (sourceLinks.length > 0 || destinationLinks.length > 0) return;
+    }
+
     copy(from, to);
     console.log(`   ✓ ${rel}`);
     copied += 1;
@@ -121,7 +134,7 @@ export function commandNew(branch, { cwd = process.cwd(), config }) {
     copyCarryPath(dir, (from, to) => {
       mkdirSync(dirname(to), { recursive: true });
       cpSync(from, to, { recursive: true });
-    });
+    }, { directory: true });
   }
   if (copied === 0 && refused.length === 0 && (config.carryFiles.length > 0 || config.carryDirs.length > 0)) {
     console.log('   ! nothing was copied — the new worktree carries none of them');
@@ -152,4 +165,5 @@ export function commandNew(branch, { cwd = process.cwd(), config }) {
   }
 
   console.log(`\n✓ ${target}\n  cd ${target}\n`);
+  return { path: target, branch };
 }

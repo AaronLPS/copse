@@ -3,106 +3,144 @@
 Many agent sessions, one repository, no collisions.
 
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
-[![test](https://github.com/AaronLPS/copse/actions/workflows/test.yml/badge.svg)](https://github.com/AaronLPS/copse/actions/workflows/test.yml)
+[![test](https://github.com/AaronLPS/copse/actions/workflows/copse.yml/badge.svg)](https://github.com/AaronLPS/copse/actions/workflows/copse.yml)
 [![node: >=20](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](package.json)
 [![dependencies: 0](https://img.shields.io/badge/dependencies-0-brightgreen)](package.json)
 
-## Why
+copse is the repository framework for running Claude Code, Codex, or ordinary
+shell-driven feature work in parallel. It gives every feature a deterministic
+Git worktree, carries ignored local files such as `.env`, installs shared Git
+and agent hooks, records ownership and dependencies, runs one verification path
+locally and in CI, and gates PR merge and cleanup.
 
-One person, several coding-agent sessions — Claude Code, Codex, or a mix —
-against the same checkout. Left alone, they collide: two sessions editing
-the same working tree stomp each other's uncommitted changes, and a
-hand-made `git worktree add` silently drops gitignored files like `.env`,
-so the new worktree fails at runtime in a way that looks like a code
-problem.
-
-copse gives each session its own git worktree, named after its branch, with
-those gitignored files copied over. It does not schedule agents, does not
-decide what they work on, and does not merge anything on their behalf — it
-manages the directories.
-
-```mermaid
-flowchart LR
-    A["copse new feat/x"] --> B["work in the<br/>new worktree"]
-    B --> C["copse list<br/>(PR state per worktree)"]
-    C --> D["copse drop feat/x"]
-    D -->|"anything to lose?"| E["refuses, says why"]
-    D -->|"clean and pushed"| F["rescues carried files,<br/>removes the directory"]
-```
+It coordinates mechanics, not product judgment: copse does not choose tasks,
+schedule models, or automatically resolve semantic merge conflicts.
 
 ## Quickstart
 
-copse is zero-dependency and requires Node ≥20. It is **not** on npm yet;
-until then, run it straight from the repository:
+copse requires Node 20 or newer and has no runtime dependencies. It is not yet
+published to npm, so run the current repository version directly:
 
+```sh
+npx github:AaronLPS/copse init
+npx github:AaronLPS/copse init --apply
 ```
-npx github:AaronLPS/copse <command>
+
+The first command reports what is missing or conflicting. `--apply` creates
+only absent wiring, merges copse hooks into existing Codex/Claude settings, and
+never overwrites a consumer-owned instruction or workflow file.
+
+For repeated use before the npm release, set the generated runner explicitly:
+
+```json
+{
+  "runner": ["npx", "--yes", "github:AaronLPS/copse"]
+}
 ```
 
-(or from a checkout: `node /path/to/copse/src/cli.mjs`, or `npm link`.)
+Then start isolated work:
 
-A real run, from a throwaway repository:
-
+```sh
+copse claim feat/inbox-filter --owner alice --depends-on feat/search-api
+copse start feat/inbox-filter --agent codex
+# or: copse start feat/inbox-filter --agent claude
+# or: copse start feat/inbox-filter -- npm run dev
 ```
-$ npx github:AaronLPS/copse new feat/inbox-filter
-→ fetching, so origin/main is current
-→ /home/me/ws/proj-feat-inbox-filter  (feat/inbox-filter from origin/main)
-→ copying the files git will not carry
-   ✓ .env.test
 
-✓ /home/me/ws/proj-feat-inbox-filter
-  cd /home/me/ws/proj-feat-inbox-filter
+`start` finds or creates the worktree and launches the chosen command with that
+worktree as its working directory. A child process cannot change its parent
+shell's directory, so this launcher—not a fragile `cd` hook—is the reliable
+automatic entry point.
+
+## Lifecycle
+
+```mermaid
+flowchart LR
+    I["copse init --apply"] --> C["claim feature"]
+    C --> S["copse start"]
+    S --> W["agent works in isolated worktree"]
+    W --> V["copse verify"]
+    V --> L["copse land --yes"]
+    L --> D["release coordination state<br/>and safely remove worktree"]
 ```
+
+The main worktree stays on `baseBranch`. Git hooks reject commits and pushes to
+protected branches and reject illegal feature branch names. Repository-local
+Codex and Claude Code hooks add worktree context at session start and reject
+feature edits attempted in the main worktree. CI and a GitHub ruleset remain
+the backstop when agent hooks are disabled or untrusted.
 
 ## Commands
 
-```
-copse new <prefix>/<lower-kebab>   create a worktree, branch, and carry the ignored files
-copse list                         every worktree, and whether its directory name still fits
-copse drop <branch>                remove a worktree, refusing while anything would be lost
-copse doctor                       is the carried-file declaration and every worktree name still true
+```text
+copse init [--apply]                 inspect/apply repository wiring
+copse new <branch>                   create a worktree and carry local files
+copse start <branch> [--agent name]  create/find it and launch an agent
+copse claim <branch> [options]       record owner and dependencies
+copse release <branch>               mark a dependency released
+copse list [--json]                  worktrees, PRs, ownership and blockers
+copse verify                         doctor, then configured argv checks
+copse land [branch] [--yes]          gate, merge and safely clean up
+copse drop <branch>                  remove only when nothing can be lost
+copse doctor                         validate wiring and worktree state
+copse protect [--apply]              preview/apply the GitHub ruleset
+copse hook <event>                   internal forward target
 ```
 
-Full behavior — `new`'s refusals, `list`'s drift and PR states, `drop`'s
-refuse-then-rescue sequence, `doctor`'s exit codes — is in
-[`docs/commands.md`](docs/commands.md).
+See [the command reference](docs/commands.md) for preconditions, dry-run
+behavior, and recovery paths.
 
 ## Configuration
 
-One optional `copse.config.json` at the repository root; every key has a
-default, so no config file is needed to start.
+`copse.config.json` declares facts and argv arrays; configured commands never
+go through a shell.
 
 ```json
 {
   "baseBranch": "main",
+  "releaseBranch": null,
+  "branchPrefixes": ["feat", "fix", "docs", "chore"],
   "carryFiles": [".env.test"],
   "carryDirs": ["supabase/.temp"],
-  "install": ["pnpm", "install"]
+  "install": ["pnpm", "install"],
+  "verify": [["pnpm", "test"], ["pnpm", "lint"]],
+  "agents": {
+    "codex": ["codex"],
+    "claude": ["claude"]
+  },
+  "coordinationFile": ".copse/features.json",
+  "runner": ["npx", "--yes", "copse"]
 }
 ```
 
-All keys, their validation rules, and the branch-name/directory-name scheme
-are in [`docs/configuration.md`](docs/configuration.md).
+All defaults and validation rules are in
+[the configuration reference](docs/configuration.md).
 
-`install` runs a command from the repository's config with no prompt — the
-same trust boundary as `npm install` lifecycle scripts. The full trust
-model is in [`SECURITY.md`](SECURITY.md).
+## Agent integration and trust
 
-## Status
+`init --apply` writes forwards in `.codex/hooks.json`,
+`.claude/settings.json`, `AGENTS.md`, and `CLAUDE.md`. Codex requires review of
+new or changed non-managed project hooks; use `/hooks` to inspect and trust
+them. Claude Code exposes its project hooks through its own `/hooks` browser.
+The generated commands delegate to the configured `runner`, so upgrades live
+in the package rather than copied hook implementations.
 
-This is the first slice of a larger design (see
-[`docs/DESIGN.md`](docs/DESIGN.md)); this README describes only what is
-implemented and tested today. `copse init`, `land`, `verify`, `protect`,
-and `hook` are designed but not built — running one just prints the usage
-text.
+Live feature ownership is stored in Git's common directory at
+`.git/copse/features.json`, immediately visible from all worktrees without
+dirtying a branch. The committed `.copse/features.json` documents the state
+format and seeds new clones.
 
-## More
+## Development
 
-- [`docs/commands.md`](docs/commands.md) — full command reference and debugging.
-- [`docs/configuration.md`](docs/configuration.md) — config keys and naming rules.
-- [`CONTRIBUTING.md`](CONTRIBUTING.md) — how the test suite and the
-  architecture rule work, before sending a pull request.
-- [`SECURITY.md`](SECURITY.md) — copse's trust boundary and how to report
-  a vulnerability.
-- [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) — the standard this project
-  holds itself to.
+```sh
+npm test                 # unit and real-Git integration tests
+npm run check            # syntax-check every module
+npm run test:coverage    # coverage report
+npm run test:package     # pack, install, and invoke the published artifact
+```
+
+The CI matrix runs Node 20, 22, and 24, cancels superseded runs, uses
+least-privilege permissions, runs the full local `copse verify` path, records
+coverage, and smoke-tests the package. Architecture and contribution rules are
+in [CONTRIBUTING.md](CONTRIBUTING.md); the trust model is in
+[SECURITY.md](SECURITY.md).

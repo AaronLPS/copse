@@ -132,3 +132,16 @@ export function driftNote(entry, config, { repoDir }) {
   if (resolve(expected) === resolve(entry.path)) return null;
   return `⚠ expected ${expected}`;
 }
+
+export function landBlockers({ legal, protectedBranch, dirty, unpushed, pr, checksGreen, dependencies = [] }) {
+  const blockers = [];
+  if (!legal) blockers.push('branch name is not legal for this repository');
+  if (protectedBranch) blockers.push('cannot land a protected branch');
+  if (dirty === 'unknown') blockers.push('dirty state is unknown');
+  else if (dirty) blockers.push('working tree is dirty');
+  if (unpushed > 0) blockers.push(`${unpushed} unpushed commit(s)`);
+  if (!pr) blockers.push('no pull request exists for this branch');
+  if (pr && !checksGreen) blockers.push('pull request checks are not green');
+  if (dependencies.length) blockers.push(`unreleased dependencies: ${dependencies.join(', ')}`);
+  return blockers;
+}

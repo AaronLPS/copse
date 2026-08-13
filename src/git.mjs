@@ -3,8 +3,8 @@
  * here — this module answers questions, and src/decisions.mjs judges.
  */
 import { execFileSync } from 'node:child_process';
-import { lstatSync, realpathSync } from 'node:fs';
-import { join, sep } from 'node:path';
+import { lstatSync, readdirSync, realpathSync } from 'node:fs';
+import { join, resolve, sep } from 'node:path';
 
 /**
  * `gh` missing or refusing is instant — ENOENT or a non-zero exit come back in
@@ -70,6 +70,15 @@ export function mainWorktree({ cwd = process.cwd() } = {}) {
   const found = worktrees({ cwd }).find((entry) => entry.isMain);
   if (!found) throw new Error('could not identify the main worktree');
   return found;
+}
+
+export function gitCommonDir({ cwd = process.cwd() } = {}) {
+  const value = git(['rev-parse', '--git-common-dir'], { cwd });
+  return resolve(cwd, value);
+}
+
+export function worktreeRoot({ cwd = process.cwd() } = {}) {
+  return git(['rev-parse', '--show-toplevel'], { cwd });
 }
 
 /**
@@ -143,6 +152,21 @@ export function carryPathState(path) {
     throw error;
   }
   return stat.isSymbolicLink() ? 'symlink' : 'present';
+}
+
+/** Return every symlink below a carried directory without following any. */
+export function nestedSymlinks(path) {
+  if (!lstatSync(path).isDirectory()) return [];
+  const found = [];
+  function walk(current, prefix) {
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isSymbolicLink()) found.push(relative);
+      else if (entry.isDirectory()) walk(join(current, entry.name), relative);
+    }
+  }
+  walk(path, '');
+  return found;
 }
 
 /**

@@ -1,6 +1,6 @@
 {
   "name": "copse",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Many agent sessions, one repository, no collisions.",
   "keywords": [
     "git",
@@ -28,7 +28,10 @@
     "src"
   ],
   "scripts": {
-    "test": "node --test test/*.mjs"
+    "test": "node --test test/*.mjs",
+    "test:coverage": "node --test --experimental-test-coverage test/*.mjs",
+    "check": "node scripts/check-syntax.mjs",
+    "test:package": "node scripts/package-smoke.mjs"
   },
   "license": "MIT"
 }
