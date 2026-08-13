@@ -39,7 +39,6 @@ export function desiredWiring(config) {
 - Never remove worktrees with raw Git; use \`copse drop\` so carried files are rescued.
 `;
   const enterRoot = 'cd "$(git rev-parse --show-toplevel)"';
-  const hook = (event) => `#!/bin/sh\n${enterRoot} || exit 1\nexec ${forward} hook ${event} "$@"\n`;
   const agentCommand = (event) => `${enterRoot} && exec ${forward} hook ${event} --protocol 1`;
   const agentHooks = (projectRoot) => JSON.stringify({
     hooks: {
@@ -48,11 +47,9 @@ export function desiredWiring(config) {
     },
     ...(projectRoot ? { $schema: 'https://json.schemastore.org/claude-code-settings.json' } : {}),
   }, null, 2) + '\n';
-  const workflow = `name: copse\n\non:\n  pull_request:\n  push:\n    branches: [${config.baseBranch ?? 'main'}]\n\npermissions:\n  contents: read\n\nconcurrency:\n  group: copse-\${{ github.workflow }}-\${{ github.ref }}\n  cancel-in-progress: true\n\njobs:\n  verify:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 20\n${ciSetupLines(config)}      - run: git config core.hooksPath .githooks\n      - run: ${forward} verify\n`;
+  const workflow = `name: copse\n\non:\n  pull_request:\n  push:\n    branches: [${config.baseBranch ?? 'main'}]\n\npermissions:\n  contents: read\n\nconcurrency:\n  group: copse-\${{ github.workflow }}-\${{ github.ref }}\n  cancel-in-progress: true\n\njobs:\n  verify:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 20\n${ciSetupLines(config)}      - run: git config core.hooksPath .copse/hooks\n      - run: ${forward} verify\n`;
   const state = JSON.stringify({ version: 1, features: {} }, null, 2) + '\n';
   const files = new Map([
-    ['.githooks/pre-commit', hook('pre-commit')],
-    ['.githooks/pre-push', hook('pre-push')],
     ['.codex/hooks.json', agentHooks(false)],
     ['.claude/settings.json', agentHooks(true)],
     ['AGENTS.md', agentContract],
@@ -134,7 +131,7 @@ export function reconcileWiring(root, desired, { apply = false, previousDesired 
       report.missing.push(relative);
       if (apply) {
         atomicWrite(path, content);
-        if (relative.startsWith('.githooks/')) chmodSync(path, 0o755);
+        if (relative.startsWith('.copse/hooks/')) chmodSync(path, 0o755);
         report.created.push(relative);
       }
     } else {
@@ -143,7 +140,7 @@ export function reconcileWiring(root, desired, { apply = false, previousDesired 
       if (wiringMatches(relative, actual, content)) report.matching.push(relative);
       else if (apply && previous === actual) {
         atomicWrite(path, content);
-        if (relative.startsWith('.githooks/')) chmodSync(path, 0o755);
+        if (relative.startsWith('.copse/hooks/')) chmodSync(path, 0o755);
         report.updated.push(relative);
       }
       else if (apply && agentSettingsPath(relative)) {

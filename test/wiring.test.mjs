@@ -6,15 +6,16 @@ import { tmpdir } from 'node:os';
 
 import { desiredWiring, detectCiMode, reconcileWiring } from '../src/wiring.mjs';
 
-test('desired wiring covers Git, Codex, Claude, instructions, coordination and CI', () => {
+test('desired wiring covers Codex, Claude, instructions, coordination and CI', () => {
   const files = desiredWiring({ verify: [['npm', 'test']] });
-  for (const path of ['.githooks/pre-commit', '.githooks/pre-push', '.codex/hooks.json', '.claude/settings.json', 'AGENTS.md', 'CLAUDE.md', '.copse/features.json', '.github/workflows/copse.yml']) {
+  for (const path of ['.codex/hooks.json', '.claude/settings.json', 'AGENTS.md', 'CLAUDE.md', '.copse/features.json', '.github/workflows/copse.yml']) {
     assert.ok(files.has(path), `missing ${path}`);
   }
-  assert.match(files.get('.githooks/pre-commit'), /git rev-parse --show-toplevel/);
+  assert.equal(files.has('.githooks/pre-commit'), false);
+  assert.equal(files.has('.githooks/pre-push'), false);
   assert.match(files.get('.codex/hooks.json'), /git rev-parse --show-toplevel/);
   assert.match(files.get('.codex/hooks.json'), /--protocol 1/);
-  assert.match(files.get('.github/workflows/copse.yml'), /git config core\.hooksPath \.githooks/);
+  assert.match(files.get('.github/workflows/copse.yml'), /git config core\.hooksPath \.copse\/hooks/);
 });
 
 test('reconcile reports conflicts and apply never overwrites them', () => {
@@ -24,7 +25,7 @@ test('reconcile reports conflicts and apply never overwrites them', () => {
     const report = reconcileWiring(root, desiredWiring({ verify: [['npm', 'test']] }), { apply: true });
     assert.ok(report.conflicts.includes('AGENTS.md'));
     assert.equal(readFileSync(join(root, 'AGENTS.md'), 'utf8'), 'consumer owned\n');
-    assert.ok(report.created.includes('.githooks/pre-commit'));
+    assert.ok(report.created.includes('.codex/hooks.json'));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
