@@ -37,6 +37,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - run: git config core.hooksPath .githooks
-      - run: node src/cli.mjs verify
+      - run: git config core.hooksPath .copse/hooks
+      - run: "'node' 'src/cli.mjs' verify"
       - run: npm run test:coverage

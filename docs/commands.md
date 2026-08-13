@@ -1,13 +1,27 @@
 # Command reference
 
-## `copse init [--apply] [--ci npm|pnpm|yarn|custom|none]`
+## `copse init [--apply] [--ci npm|pnpm|yarn|custom|none] [--runner-package <package-spec>]`
 
 Reconciles an existing or new Git repository with copse. Report mode is the
 default and returns non-zero while wiring is missing or conflicting. `--apply`
 creates missing config, Git hooks, Codex/Claude settings, instruction files,
 coordination seed, and an inferred or explicitly selected CI workflow. Existing agent settings
 are merged; other conflicting files are named and left unchanged. It sets the
-clone-local `core.hooksPath` to `.githooks`.
+clone-local `core.hooksPath` to `.copse/hooks` only after reconciliation has no
+conflicts.
+
+`--runner-package` persists `runner` as `npx --yes <package-spec>` before the
+forwards are generated. It accepts one non-empty npm/GitHub/Git/local package
+spec as a single argv element and never evaluates it through a shell. In a
+valid existing config it updates only `runner`; report mode previews the
+change, while malformed or conflicting state remains untouched.
+
+Before activating `.copse/hooks`, apply mode records the previously active hook
+directory in clone-local Git config as `copse.previousHooksPath`. Existing
+Husky and custom hooks remain byte-for-byte intact and run after copse policy
+succeeds. `<default>` means the common `.git/hooks` directory; exact legacy
+copse `.githooks` wrappers also migrate to this sentinel rather than delegating
+back into copse. Repeated apply is idempotent.
 
 ## `copse new <branch>`
 
@@ -75,9 +89,10 @@ local branch for an explicit later deletion.
 
 Checks carried paths, worktree naming, every generated forward, agent settings,
 CI wiring, runner executability, stale resources, measurable listening-port
-PID/cwd ownership, and clone-local
-`core.hooksPath`. It reports all findings and exits
-one when any exist.
+PID/cwd ownership, and clone-local Git hook configuration. It verifies the
+`.copse/hooks` wrappers and executable modes, `core.hooksPath`, non-recursive
+`copse.previousHooksPath`, and any delegated hook that exists. It reports all
+findings and exits one when any exist.
 
 ## `copse protect [--apply]`
 

@@ -28,6 +28,13 @@ refused for carried and coordination paths. Carried leaf and intermediate
 symlinks are checked again at copy time; `carryDirs` trees are also walked and
 refuse every nested symlink before copying or rescue begins.
 
+`copse init --runner-package <package-spec>` is the bootstrap-safe way to set
+`runner`: it writes `["npx", "--yes", "<package-spec>"]` before reconciling
+Git, Codex, Claude, and CI forwards. Package specs remain single argv elements,
+not shell source. The previous Git hook directory is intentionally not part of
+this committed schema; each clone stores it locally as
+`copse.previousHooksPath` and activates the committed `.copse/hooks` wrappers.
+
 `ciMode: auto` detects `pnpm-lock.yaml`, `yarn.lock`, `package-lock.json`, or
 `package.json`. Every generated workflow installs Node because copse itself
 requires it, but only npm/pnpm/yarn modes install project dependencies.
@@ -58,11 +65,18 @@ Keeping the prefix makes branch-to-directory conversion reversible and avoids
 
 ## Runner choices
 
-After npm publication the default requires no project dependency. Before that,
-use the GitHub source:
+Bootstrap from GitHub in one invocation (pin a reviewed commit or tag for
+production use):
 
-```json
-{ "runner": ["npx", "--yes", "github:AaronLPS/copse"] }
+```sh
+npx github:AaronLPS/copse init --apply \
+  --runner-package github:AaronLPS/copse
+```
+
+After npm publication, select the pinned package release explicitly:
+
+```sh
+npx copse@0.4.0 init --apply --runner-package copse@0.4.0
 ```
 
 copse itself dogfoods a checkout-local runner:
@@ -70,3 +84,18 @@ copse itself dogfoods a checkout-local runner:
 ```json
 { "runner": ["node", "src/cli.mjs"] }
 ```
+
+## Git hook coexistence
+
+`init --apply` installs executable copse-owned wrappers at
+`.copse/hooks/pre-commit` and `.copse/hooks/pre-push`. The wrappers run copse
+policy first, then resolve and invoke the corresponding executable hook from
+`copse.previousHooksPath` with the original arguments and status. `pre-push`
+also replays the exact stdin ref-update stream to both hooks. Missing or
+non-executable previous hooks are skipped; invalid paths and delegation cycles
+are reported by `copse doctor`.
+
+The clone-local previous value is the prior `core.hooksPath` verbatim, or
+`<default>` for the common `.git/hooks` directory. Existing hook files are
+never edited or removed, and repeated init does not replace the saved path with
+`.copse/hooks`.
