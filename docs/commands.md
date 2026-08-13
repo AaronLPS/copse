@@ -38,7 +38,8 @@ writes the configured coordination file instead.
 ## `copse list [--json]`
 
 Shows every worktree, branch/name drift, dirty and unpushed state, pull request,
-owner, feature status, live lease, resources, and unreleased dependencies.
+owner, feature status, live lease, resources, listening-port PID/cwd when the
+host provides `lsof`, and unreleased dependencies.
 `--json` emits a versioned machine-readable snapshot.
 
 ## `copse verify`
@@ -73,7 +74,8 @@ local branch for an explicit later deletion.
 ## `copse doctor`
 
 Checks carried paths, worktree naming, every generated forward, agent settings,
-CI wiring, runner executability, stale resources, and clone-local
+CI wiring, runner executability, stale resources, measurable listening-port
+PID/cwd ownership, and clone-local
 `core.hooksPath`. It reports all findings and exits
 one when any exist.
 

@@ -13,9 +13,11 @@ import { driftNote } from '../decisions.mjs';
 import { CONFIG_FILENAME } from '../config.mjs';
 import { desiredWiring, wiringMatches } from '../wiring.mjs';
 import { coordinationStatePath, loadCoordination } from '../coordination.mjs';
+import { inspectListeningPort } from '../process.mjs';
 
-export function commandDoctor({ cwd = process.cwd(), config }) {
+export function commandDoctor({ cwd = process.cwd(), config, inspectPort = inspectListeningPort }) {
   const findings = [];
+  const observations = [];
   const repoDir = mainWorktree({ cwd }).path;
   const wiringRoot = worktreeRoot({ cwd });
 
@@ -45,10 +47,15 @@ export function commandDoctor({ cwd = process.cwd(), config }) {
 
   const coordination = loadCoordination(coordinationStatePath({ cwd, config }));
   for (const [name, reservation] of Object.entries(coordination.resources)) {
-    if (!reservation.leaseId) continue;
-    const lease = coordination.leases[reservation.branch];
-    if (!lease || lease.id !== reservation.leaseId) {
-      findings.push(`stale resource reservation ${name}: owning lease no longer exists`);
+    if (reservation.leaseId) {
+      const lease = coordination.leases[reservation.branch];
+      if (!lease || lease.id !== reservation.leaseId) {
+        findings.push(`stale resource reservation ${name}: owning lease no longer exists`);
+      }
+    }
+    const listener = inspectPort(name);
+    if (listener) {
+      observations.push(`${name} listens on pid ${listener.pid}${listener.command ? ` (${listener.command})` : ''}${listener.cwd ? ` in ${listener.cwd}` : ''}`);
     }
   }
 
@@ -72,6 +79,7 @@ export function commandDoctor({ cwd = process.cwd(), config }) {
   }
 
   console.log('');
+  for (const observation of observations) console.log(`  · ${observation}`);
   if (findings.length === 0) {
     console.log('✓ copse: nothing to report\n');
   } else {
@@ -79,5 +87,5 @@ export function commandDoctor({ cwd = process.cwd(), config }) {
     console.log(`\n✗ ${findings.length} finding(s)\n`);
   }
 
-  return { ok: findings.length === 0, findings };
+  return { ok: findings.length === 0, findings, observations };
 }

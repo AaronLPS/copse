@@ -141,6 +141,9 @@ dirtying a branch. `coordinationBackend: "committed"` instead writes the
 configured reviewed file for cross-machine synchronization. The committed seed
 initializes local state in a fresh clone.
 
+For resources named `port:<number>`, `copse list` and `copse doctor` also show
+the listening process PID and working directory when `lsof` is available.
+
 ## Development
 
 ```sh

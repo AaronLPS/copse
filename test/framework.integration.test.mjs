@@ -175,7 +175,16 @@ test('doctor reports a resource whose owning lease no longer exists', () => {
       leases: {},
       resources: { 'port:3000': { branch: 'feat/gone', owner: 'alice', leaseId: 'missing' } },
     });
-    const result = commandDoctor({ cwd: repo, config });
+    const result = commandDoctor({
+      cwd: repo,
+      config,
+      inspectPort(name) {
+        return name === 'port:3000'
+          ? { port: 3000, pid: 42, command: 'node', cwd: '/worktrees/feat-gone' }
+          : null;
+      },
+    });
     assert.match(result.findings.join('\n'), /stale resource.*port:3000/);
+    assert.match(result.observations.join('\n'), /pid 42.*node.*feat-gone/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
