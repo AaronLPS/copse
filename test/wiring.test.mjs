@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { desiredWiring, detectCiMode, reconcileWiring } from '../src/wiring.mjs';
+import { desiredWiring, detectCiMode, reconcileWiring, wiringMatches } from '../src/wiring.mjs';
 
 test('desired wiring covers Codex, Claude, instructions, coordination and CI', () => {
   const files = desiredWiring({ verify: [['npm', 'test']] });
@@ -29,6 +29,42 @@ test('CI runner is a JSON-quoted YAML scalar that extracts to the exact shell co
 
   assert.match(scalar ?? '', /^"/);
   assert.equal(JSON.parse(scalar), `'npx' '--yes' '${artifact}' verify`);
+});
+
+test('CI matching uses the final runner step when custom setup also ends in verify', () => {
+  const expected = `steps:
+      - run: "echo verify"
+      - run: "'npx' '--yes' 'copse@0.5.0' verify"
+`;
+  const cases = [
+    {
+      name: 'current JSON-quoted scalar',
+      stale: `steps:
+      - run: "echo verify"
+      - run: "'npx' '--yes' 'copse@0.4.0' verify"
+# consumer-owned customization
+`,
+      current: `${expected}# consumer-owned customization\n`,
+    },
+    {
+      name: 'legacy raw scalar',
+      stale: `steps:
+      - run: "echo verify"
+      - run: 'npx' '--yes' 'copse@0.4.0' verify
+# consumer-owned customization
+`,
+      current: `steps:
+      - run: "echo verify"
+      - run: 'npx' '--yes' 'copse@0.5.0' verify
+# consumer-owned customization
+`,
+    },
+  ];
+
+  for (const { name, stale, current } of cases) {
+    assert.equal(wiringMatches('.github/workflows/copse.yml', stale, expected), false, `${name} accepted a stale runner`);
+    assert.equal(wiringMatches('.github/workflows/copse.yml', current, expected), true, `${name} rejected the exact runner`);
+  }
 });
 
 test('reconcile reports conflicts and apply never overwrites them', () => {

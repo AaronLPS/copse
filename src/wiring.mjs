@@ -123,7 +123,7 @@ export function wiringMatches(relative, actual, expected) {
       if (!scalar) return [];
       try { return [JSON.parse(scalar)]; } catch { return [scalar]; }
     });
-    const expectedVerify = commands(expected).find((command) => command.endsWith(' verify'));
+    const expectedVerify = commands(expected).at(-1);
     return actual === expected || (expectedVerify !== undefined && commands(actual).includes(expectedVerify));
   }
   if (!agentSettingsPath(relative)) return actual === expected;
