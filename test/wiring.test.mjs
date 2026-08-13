@@ -104,6 +104,55 @@ test('CI matching requires the exact final runner command in jobs.verify', () =>
   assert.equal(wiringMatches('.github/workflows/copse.yml', inVerifyJob, expected), true);
 });
 
+test('CI matching ignores fake jobs and run steps inside YAML block scalars', () => {
+  const expected = `jobs:
+  verify:
+    steps:
+      - run: "copse verify"
+`;
+  const cases = [
+    `name: |
+  jobs:
+    verify:
+      steps:
+        - run: "copse verify"
+jobs:
+  verify:
+    steps:
+      - run: "echo no verification"
+`,
+    `name: >-
+  jobs:
+    verify:
+      steps:
+        - run: "copse verify"
+jobs:
+  verify:
+    steps:
+      - run: "echo no verification"
+`,
+    `jobs:
+  verify:
+    name: |2-
+      steps:
+        - run: "copse verify"
+    steps:
+      - run: "echo no verification"
+`,
+    `jobs:
+  verify:
+    name: >2+
+      - run: "copse verify"
+    steps:
+      - run: "echo no verification"
+`,
+  ];
+
+  for (const actual of cases) {
+    assert.equal(wiringMatches('.github/workflows/copse.yml', actual, expected), false);
+  }
+});
+
 test('reconcile reports conflicts and apply never overwrites them', () => {
   const root = mkdtempSync(join(tmpdir(), 'copse-wire-'));
   try {

@@ -122,32 +122,69 @@ function runCommand(line) {
   try { return JSON.parse(scalar); } catch { return scalar; }
 }
 
+function structuralYamlLines(text) {
+  const lines = [];
+  let blockIndent = null;
+  for (const line of text.split('\n')) {
+    if (/^\s*(?:#.*)?$/.test(line)) continue;
+    const indent = line.match(/^\s*/)[0].length;
+    if (blockIndent !== null) {
+      if (indent > blockIndent) continue;
+      blockIndent = null;
+    }
+    lines.push({ indent, line });
+    if (/^\s*-\s*[|>](?:[1-9][+-]?|[+-][1-9]?)?\s*(?:#.*)?$/.test(line)
+        || /:\s*[|>](?:[1-9][+-]?|[+-][1-9]?)?\s*(?:#.*)?$/.test(line)) {
+      blockIndent = indent;
+    }
+  }
+  return lines;
+}
+
+function mappingKey(line) {
+  return line.match(/^\s*([^\s:#][^:]*)\s*:\s*(?:#.*)?$/)?.[1] ?? null;
+}
+
 function workflowJobCommands(text, wantedJob) {
-  const lines = text.split('\n');
-  const jobsIndex = lines.findIndex((line) => /^(\s*)jobs:\s*(?:#.*)?$/.test(line));
+  const lines = structuralYamlLines(text);
+  const jobsIndex = lines.findIndex(({ indent, line }) => indent === 0 && mappingKey(line) === 'jobs');
   if (jobsIndex === -1) return [];
-  const jobsIndent = lines[jobsIndex].match(/^\s*/)[0].length;
   let jobIndent = null;
   let jobStart = -1;
   for (let index = jobsIndex + 1; index < lines.length; index += 1) {
-    const line = lines[index];
-    if (/^\s*(?:#.*)?$/.test(line)) continue;
-    const indent = line.match(/^\s*/)[0].length;
-    if (indent <= jobsIndent) break;
-    const key = line.match(/^\s*([^\s:#][^:]*)\s*:\s*(?:#.*)?$/)?.[1];
+    const { indent, line } = lines[index];
+    if (indent === 0) break;
     if (jobIndent === null) jobIndent = indent;
-    if (indent === jobIndent && key === wantedJob) {
+    if (indent === jobIndent && mappingKey(line) === wantedJob) {
       jobStart = index + 1;
       break;
     }
   }
   if (jobStart === -1) return [];
-  const commands = [];
+
+  let propertyIndent = null;
+  let stepsStart = -1;
   for (let index = jobStart; index < lines.length; index += 1) {
-    const line = lines[index];
-    if (!/^\s*(?:#.*)?$/.test(line) && line.match(/^\s*/)[0].length <= jobIndent) break;
-    const command = runCommand(line);
-    if (command !== null) commands.push(command);
+    const { indent, line } = lines[index];
+    if (indent <= jobIndent) break;
+    if (propertyIndent === null) propertyIndent = indent;
+    if (indent === propertyIndent && mappingKey(line) === 'steps') {
+      stepsStart = index + 1;
+      break;
+    }
+  }
+  if (stepsStart === -1) return [];
+
+  const commands = [];
+  let stepIndent = null;
+  for (let index = stepsStart; index < lines.length; index += 1) {
+    const { indent, line } = lines[index];
+    if (indent <= propertyIndent) break;
+    if (stepIndent === null) stepIndent = indent;
+    if (indent === stepIndent) {
+      const command = runCommand(line);
+      if (command !== null) commands.push(command);
+    }
   }
   return commands;
 }
