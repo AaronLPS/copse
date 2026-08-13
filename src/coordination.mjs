@@ -4,6 +4,18 @@ import { gitCommonDir } from './git.mjs';
 
 function clone(state) { return JSON.parse(JSON.stringify(state)); }
 
+export function normalizeCoordination(state) {
+  if (state?.version !== 1 || typeof state.features !== 'object' || state.features === null) {
+    throw new Error('invalid coordination state');
+  }
+  return {
+    version: 1,
+    features: clone(state.features),
+    leases: clone(state.leases ?? {}),
+    resources: clone(state.resources ?? {}),
+  };
+}
+
 function reaches(state, from, target, seen = new Set()) {
   if (from === target) return true;
   if (seen.has(from)) return false;
@@ -12,8 +24,7 @@ function reaches(state, from, target, seen = new Set()) {
 }
 
 export function claimFeature(state, branch, { owner, dependsOn = [] }) {
-  const next = clone(state);
-  if (next.version !== 1) throw new Error(`unsupported coordination version ${next.version}`);
+  const next = normalizeCoordination(state);
   const current = next.features[branch];
   if (current?.status === 'active' && current.owner !== owner) throw new Error(`${branch} is already owned by ${current.owner}`);
   if (dependsOn.includes(branch)) throw new Error(`${branch} cannot depend on itself`);
@@ -25,7 +36,7 @@ export function claimFeature(state, branch, { owner, dependsOn = [] }) {
 }
 
 export function releaseFeature(state, branch) {
-  const next = clone(state);
+  const next = normalizeCoordination(state);
   if (!next.features[branch]) throw new Error(`${branch} is not claimed`);
   next.features[branch].status = 'released';
   return next;
@@ -35,13 +46,77 @@ export function featureBlockers(state, branch) {
   return (state.features[branch]?.dependsOn ?? []).filter((dep) => state.features[dep]?.status !== 'released');
 }
 
+export function leaseStatus(lease, {
+  now = Date.now(),
+  host,
+  processAlive = () => true,
+} = {}) {
+  if (!lease) return 'absent';
+  if (now - lease.heartbeatAt > lease.timeoutMs) return 'stale';
+  if (host && lease.host === host) {
+    try {
+      if (!processAlive(lease.childPid ?? lease.pid)) return 'stale';
+    } catch {
+      // Unknown liveness must block rather than granting a second writer.
+    }
+  }
+  return 'active';
+}
+
+export function acquireLease(state, branch, {
+  id,
+  owner,
+  host,
+  pid,
+  childPid = null,
+  label = null,
+  now = Date.now(),
+  timeoutMs,
+  processAlive = () => true,
+}) {
+  const next = normalizeCoordination(state);
+  const existing = next.leases[branch];
+  if (leaseStatus(existing, { now, host, processAlive }) === 'active') {
+    throw new Error(`${branch} already has an active session owned by ${existing.owner}`);
+  }
+  next.leases[branch] = {
+    id,
+    owner,
+    host,
+    pid,
+    childPid,
+    label,
+    createdAt: now,
+    heartbeatAt: now,
+    timeoutMs,
+  };
+  return next;
+}
+
+export function refreshLease(state, branch, leaseId, { now = Date.now(), childPid } = {}) {
+  const next = normalizeCoordination(state);
+  const lease = next.leases[branch];
+  if (!lease || lease.id !== leaseId) throw new Error(`${branch} lease changed before refresh`);
+  lease.heartbeatAt = now;
+  if (childPid !== undefined) lease.childPid = childPid;
+  return next;
+}
+
+export function releaseLease(state, branch, leaseId) {
+  const next = normalizeCoordination(state);
+  const lease = next.leases[branch];
+  if (!lease) return next;
+  if (lease.id !== leaseId) throw new Error(`${branch} lease changed before release`);
+  delete next.leases[branch];
+  return next;
+}
+
 export function loadCoordination(path) {
   try {
     const state = JSON.parse(readFileSync(path, 'utf8'));
-    if (state.version !== 1 || typeof state.features !== 'object' || state.features === null) throw new Error('invalid coordination state');
-    return state;
+    return normalizeCoordination(state);
   } catch (error) {
-    if (error.code === 'ENOENT') return { version: 1, features: {} };
+    if (error.code === 'ENOENT') return normalizeCoordination({ version: 1, features: {} });
     throw error;
   }
 }

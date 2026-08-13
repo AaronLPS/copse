@@ -27,6 +27,10 @@ export const DEFAULTS = Object.freeze({
   agents: Object.freeze({ codex: Object.freeze(['codex']), claude: Object.freeze(['claude']) }),
   coordinationFile: '.copse/features.json',
   runner: Object.freeze(['npx', '--yes', 'copse']),
+  leaseTimeoutSeconds: 300,
+  leaseHeartbeatSeconds: 30,
+  resources: Object.freeze({}),
+  coordinationBackend: 'local',
 });
 
 function isPlainObject(value) {
@@ -89,11 +93,16 @@ export function parseConfig(raw) {
     agents: { codex: ['codex'], claude: ['claude'] },
     coordinationFile: DEFAULTS.coordinationFile,
     runner: [...DEFAULTS.runner],
+    leaseTimeoutSeconds: DEFAULTS.leaseTimeoutSeconds,
+    leaseHeartbeatSeconds: DEFAULTS.leaseHeartbeatSeconds,
+    resources: {},
+    coordinationBackend: DEFAULTS.coordinationBackend,
   };
 
   const known = new Set([
     'baseBranch', 'branchPrefixes', 'carryFiles', 'carryDirs', 'install',
     'releaseBranch', 'verify', 'agents', 'coordinationFile', 'runner',
+    'leaseTimeoutSeconds', 'leaseHeartbeatSeconds', 'resources', 'coordinationBackend',
   ]);
   for (const key of Object.keys(raw)) {
     // An unknown key is almost always a typo, and a typo that is silently
@@ -206,6 +215,52 @@ export function parseConfig(raw) {
     const problem = commandProblem(raw.runner, 'runner');
     if (problem) errors.push(problem);
     else config.runner = [...raw.runner];
+  }
+
+  for (const field of ['leaseTimeoutSeconds', 'leaseHeartbeatSeconds']) {
+    if (!(field in raw)) continue;
+    if (!Number.isInteger(raw[field]) || raw[field] <= 0) {
+      errors.push(`${field}: must be a positive integer`);
+    } else {
+      config[field] = raw[field];
+    }
+  }
+  const comparedTimeout = Number.isInteger(raw.leaseTimeoutSeconds)
+    ? raw.leaseTimeoutSeconds
+    : config.leaseTimeoutSeconds;
+  const comparedHeartbeat = Number.isInteger(raw.leaseHeartbeatSeconds)
+    ? raw.leaseHeartbeatSeconds
+    : config.leaseHeartbeatSeconds;
+  if (comparedHeartbeat >= comparedTimeout) {
+    errors.push('leaseHeartbeatSeconds: must be shorter than leaseTimeoutSeconds');
+  }
+
+  if ('resources' in raw) {
+    if (!isPlainObject(raw.resources)) {
+      errors.push('resources: must be an object mapping feature branches to resource-name arrays');
+    } else {
+      for (const [branch, names] of Object.entries(raw.resources)) {
+        if (branch.trim() === '') errors.push('resources: feature branch names must not be empty');
+        if (!Array.isArray(names)) {
+          errors.push(`resources.${branch}: must be an array`);
+          continue;
+        }
+        for (const name of names) {
+          if (typeof name !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9:._/-]*$/.test(name)) {
+            errors.push(`resources.${branch}: invalid resource name "${name}"`);
+          }
+        }
+        config.resources[branch] = [...names];
+      }
+    }
+  }
+
+  if ('coordinationBackend' in raw) {
+    if (!['local', 'committed'].includes(raw.coordinationBackend)) {
+      errors.push('coordinationBackend: must be "local" or "committed"');
+    } else {
+      config.coordinationBackend = raw.coordinationBackend;
+    }
   }
 
   return errors.length > 0 ? { ok: false, errors } : { ok: true, config };

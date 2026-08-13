@@ -114,6 +114,10 @@ test('framework configuration has safe defaults', () => {
   assert.deepEqual(config.agents, { codex: ['codex'], claude: ['claude'] });
   assert.equal(config.coordinationFile, '.copse/features.json');
   assert.deepEqual(config.runner, ['npx', '--yes', 'copse']);
+  assert.equal(config.leaseTimeoutSeconds, 300);
+  assert.equal(config.leaseHeartbeatSeconds, 30);
+  assert.deepEqual(config.resources, {});
+  assert.equal(config.coordinationBackend, 'local');
 });
 
 test('verify and agent commands must be non-empty argv arrays', () => {
@@ -130,4 +134,27 @@ test('releaseBranch and coordinationFile are validated', () => {
   const result = parseConfig({ releaseBranch: 'main', coordinationFile: '.state/features.json' });
   assert.equal(result.ok, true);
   assert.equal(result.config.releaseBranch, 'main');
+});
+
+test('lease timing, resources and coordination backend are validated together', () => {
+  const invalid = parseConfig({
+    leaseTimeoutSeconds: 0,
+    leaseHeartbeatSeconds: 60,
+    resources: { 'feat/x': ['bad resource'] },
+    coordinationBackend: 'cloud',
+  });
+  assert.equal(invalid.ok, false);
+  assert.match(invalid.errors.join('\n'), /leaseTimeoutSeconds/);
+  assert.match(invalid.errors.join('\n'), /leaseHeartbeatSeconds/);
+  assert.match(invalid.errors.join('\n'), /bad resource/);
+  assert.match(invalid.errors.join('\n'), /coordinationBackend/);
+
+  const valid = parseConfig({
+    leaseTimeoutSeconds: 120,
+    leaseHeartbeatSeconds: 10,
+    resources: { 'feat/x': ['port:3000', 'db:test'] },
+    coordinationBackend: 'committed',
+  });
+  assert.equal(valid.ok, true);
+  assert.deepEqual(valid.config.resources['feat/x'], ['port:3000', 'db:test']);
 });
