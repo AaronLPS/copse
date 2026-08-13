@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { writeSync } from 'node:fs';
+
 import { loadConfig } from './config.mjs';
 import { worktreeRoot } from './git.mjs';
 import { CopseError, commandNew } from './commands/new.mjs';
@@ -33,7 +35,7 @@ const USAGE = `
 `;
 
 const DEBUG = !['', '0', undefined].includes(process.env.COPSE_DEBUG);
-function die(message) { console.error(`\n✗ ${message}\n`); process.exit(1); }
+function die(message) { writeSync(2, `\n✗ ${message}\n\n`); process.exit(1); }
 function valuesAfter(argv, flag) {
   const values = [];
   for (let i = 0; i < argv.length; i += 1) if (argv[i] === flag && argv[i + 1]) values.push(argv[++i]);
@@ -43,7 +45,6 @@ function valuesAfter(argv, flag) {
 const argv = process.argv.slice(2);
 const [command, argument] = argv;
 if (!command || command === '--help' || command === '-h') { console.log(USAGE); process.exit(0); }
-const runnerPackage = runnerPackageFromArgv(argv);
 
 let repoDir;
 try { repoDir = worktreeRoot(); }
@@ -56,8 +57,11 @@ try {
   let status = 0;
   switch (command) {
     case 'init': {
+      const marker = argv.indexOf('--');
+      const initArgv = marker === -1 ? argv : argv.slice(0, marker);
       const ciMode = valuesAfter(argv, '--ci')[0];
       const initConfig = ciMode ? { ...config, ciMode } : config;
+      const runnerPackage = runnerPackageFromArgv(initArgv);
       status = commandInit({ config: initConfig, apply: argv.includes('--apply'), runnerPackage }).ok ? 0 : 1;
       break;
     }

@@ -26,7 +26,10 @@ export function commandInit({ cwd = process.cwd(), config, apply = false, runner
   const raw = existsSync(configPath) ? JSON.parse(readFileSync(configPath, 'utf8')) : null;
   const previousDesired = desiredWiring(effective);
   const requestedRunner = runnerPackage ? runnerForPackage(runnerPackage) : null;
-  const requestedRaw = requestedRunner ? configWithRunner(raw ?? effective, requestedRunner) : (raw ?? effective);
+  const rawWithInvocationOverrides = raw ? { ...raw, ciMode: config.ciMode } : effective;
+  const requestedRaw = requestedRunner
+    ? configWithRunner(rawWithInvocationOverrides, requestedRunner)
+    : rawWithInvocationOverrides;
   const parsed = parseConfig(requestedRaw);
   if (!parsed.ok) throw new Error(`cannot update ${CONFIG_FILENAME}:\n${parsed.errors.join('\n')}`);
   effective = parsed.config;

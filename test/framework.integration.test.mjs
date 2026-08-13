@@ -82,6 +82,21 @@ test('init runner package persists the exact package source', () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test('init keeps a selected CI mode when the config file already exists', () => {
+  const { root, repo } = makeRepo();
+  try {
+    writeFileSync(join(repo, 'copse.config.json'), JSON.stringify({
+      verify: [['npm', 'test']], ciMode: 'npm',
+    }, null, 2) + '\n');
+    const loaded = parseConfig(JSON.parse(readFileSync(join(repo, 'copse.config.json'), 'utf8'))).config;
+    const result = commandInit({ cwd: repo, config: { ...loaded, ciMode: 'pnpm' }, apply: true });
+    const workflow = readFileSync(join(repo, '.github/workflows/copse.yml'), 'utf8');
+    assert.equal(result.effectiveConfig.ciMode, 'pnpm');
+    assert.match(workflow, /pnpm install --frozen-lockfile/);
+    assert.doesNotMatch(workflow, /- run: npm install/m);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('coordination state is shared immediately across worktrees without dirtying main', () => {
   const { root, repo } = makeRepo();
   try {
