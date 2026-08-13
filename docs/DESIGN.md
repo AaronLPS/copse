@@ -2,6 +2,12 @@
 
 *2026-08-06*
 
+> Historical design record. The complete framework shipped in 0.2.0; where
+> command/configuration details differ, the
+> [completion specification](superpowers/specs/2026-08-13-complete-framework-design.md),
+> [command reference](commands.md), and [configuration reference](configuration.md)
+> describe current behavior.
+
 ## What this is
 
 A toolkit for running several coding-agent sessions against one repository at
@@ -222,16 +228,11 @@ exactly like a setting that does not work. `install` is an array rather than a
 string so the command is never handed to a shell, where an element could be
 read as an operator.
 
-Two further keys are designed but not yet parsed, and are named here so the
-sections that depend on them read straight:
+Two further keys were designed here and are parsed as of 0.2.0:
 
-- `releaseBranch` — the other half of a `devel`/`main` split. Only `land` and
-  `protect` need it, and neither exists yet.
+- `releaseBranch` — the other half of a `devel`/`main` split, used by `land`
+  and `protect`.
 - `verify` — the project's declared check list, as argued below.
-
-They are absent from the parser deliberately, not by oversight: accepting a key
-the CLI does nothing with is worse than rejecting it, because the config would
-then claim a guarantee nothing enforces.
 
 ### Why `verify` lives here and not in the workflow
 

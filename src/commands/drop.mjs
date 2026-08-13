@@ -11,6 +11,7 @@ import {
   escapingAncestor,
   git,
   mainWorktree,
+  nestedSymlinks,
   worktreeState,
   worktrees,
 } from '../git.mjs';
@@ -88,7 +89,7 @@ export function commandDrop(argument, { cwd = process.cwd(), config }) {
   const carriedFiles = [...config.carryFiles];
   const carriedDirs = [...config.carryDirs];
 
-  function classify(paths) {
+  function classify(paths, { directories = false } = {}) {
     const worktreePresent = [];
     const repoPresent = [];
     const refused = [];
@@ -113,12 +114,17 @@ export function commandDrop(argument, { cwd = process.cwd(), config }) {
       if (repoEscape && worktreeState === 'present') {
         refused.push(describeEscapingAncestor(path, repoEscape, repoDir, 'the repository'));
       }
+      if (directories && worktreeState === 'present' && repoState !== 'present' && !worktreeEscape) {
+        for (const nested of nestedSymlinks(join(entry.path, path))) {
+          refused.push(`${path}/${nested} (a nested symlink in ${entry.path}; refused rather than rescued)`);
+        }
+      }
     }
     return { worktreePresent, repoPresent, refused };
   }
 
   const files = classify(carriedFiles);
-  const dirs = classify(carriedDirs);
+  const dirs = classify(carriedDirs, { directories: true });
 
   const refusedCarry = [...files.refused, ...dirs.refused];
   if (refusedCarry.length > 0) {

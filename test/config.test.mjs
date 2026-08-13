@@ -106,3 +106,28 @@ test('loadConfig: a well-formed config file is parsed the same as parseConfig wo
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('framework configuration has safe defaults', () => {
+  const { config } = parseConfig({});
+  assert.equal(config.releaseBranch, null);
+  assert.deepEqual(config.verify, []);
+  assert.deepEqual(config.agents, { codex: ['codex'], claude: ['claude'] });
+  assert.equal(config.coordinationFile, '.copse/features.json');
+  assert.deepEqual(config.runner, ['npx', '--yes', 'copse']);
+});
+
+test('verify and agent commands must be non-empty argv arrays', () => {
+  assert.equal(parseConfig({ verify: ['npm test'] }).ok, false);
+  assert.equal(parseConfig({ verify: [[]] }).ok, false);
+  assert.equal(parseConfig({ agents: { codex: 'codex' } }).ok, false);
+  assert.equal(parseConfig({ runner: 'npx copse' }).ok, false);
+  assert.equal(parseConfig({ verify: [['npm', 'test']] }).ok, true);
+});
+
+test('releaseBranch and coordinationFile are validated', () => {
+  assert.equal(parseConfig({ releaseBranch: '' }).ok, false);
+  assert.equal(parseConfig({ coordinationFile: '../features.json' }).ok, false);
+  const result = parseConfig({ releaseBranch: 'main', coordinationFile: '.state/features.json' });
+  assert.equal(result.ok, true);
+  assert.equal(result.config.releaseBranch, 'main');
+});

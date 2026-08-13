@@ -10,12 +10,24 @@ import { dirname, relative } from 'node:path';
 
 import { pullRequestFor, worktreeState, worktrees } from '../git.mjs';
 import { driftNote, pullRequestLookupBranch, pullRequestNote } from '../decisions.mjs';
+import { coordinationStatePath, featureBlockers, loadCoordination } from '../coordination.mjs';
 
-export function commandList({ cwd = process.cwd(), config }) {
+export function commandList({ cwd = process.cwd(), config, json = false }) {
   const entries = worktrees({ cwd });
   const repoDir = entries.find((entry) => entry.isMain).path;
+  const coordination = loadCoordination(coordinationStatePath({ cwd }));
   const parent = dirname(repoDir);
   let drifted = 0;
+
+  if (json) {
+    const snapshot = entries.map((entry) => ({
+      path: entry.path, branch: entry.branch, main: entry.isMain, detached: entry.detached,
+      coordination: entry.branch ? coordination.features[entry.branch] ?? null : null,
+      blockedBy: entry.branch ? featureBlockers(coordination, entry.branch) : [],
+    }));
+    console.log(JSON.stringify({ version: 1, worktrees: snapshot, features: coordination.features }, null, 2));
+    return snapshot;
+  }
 
   console.log('');
   for (const entry of entries) {
@@ -63,6 +75,11 @@ export function commandList({ cwd = process.cwd(), config }) {
         : '');
     console.log(`  ${relative(parent, entry.path).padEnd(38)} ${String(branch).padEnd(34)} ${shown}`);
     if (flags.length) console.log(`  ${''.padEnd(38)} ${flags.join(', ')}`);
+    const feature = entry.branch ? coordination.features[entry.branch] : null;
+    if (feature) {
+      const blocked = featureBlockers(coordination, entry.branch);
+      console.log(`  ${''.padEnd(38)} owner ${feature.owner}, ${feature.status}${blocked.length ? `, blocked by ${blocked.join(', ')}` : ''}`);
+    }
   }
 
   console.log(

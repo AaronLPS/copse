@@ -1,83 +1,78 @@
 #!/usr/bin/env node
-/**
- * Argument dispatch and the one place a refusal becomes an exit code.
- */
 import { loadConfig } from './config.mjs';
-import { mainWorktree } from './git.mjs';
+import { worktreeRoot } from './git.mjs';
 import { CopseError, commandNew } from './commands/new.mjs';
 import { commandList } from './commands/list.mjs';
 import { commandDrop } from './commands/drop.mjs';
 import { commandDoctor } from './commands/doctor.mjs';
+import { commandInit } from './commands/init.mjs';
+import { commandHook } from './commands/hook.mjs';
+import { commandStart } from './commands/start.mjs';
+import { commandClaim } from './commands/claim.mjs';
+import { commandRelease } from './commands/release.mjs';
+import { commandVerify } from './commands/verify.mjs';
+import { commandLand } from './commands/land.mjs';
+import { commandProtect } from './commands/protect.mjs';
 
 const USAGE = `
-  copse new <prefix>/<lower-kebab>   worktree off the base branch, files carried
-  copse list                         every worktree, and whether its name still fits
-  copse drop <branch>                refuses while there is anything to lose
-  copse doctor                       is copse still wired into this repository
-
-  The directory is derived from the branch. Configure in copse.config.json.
+  copse init [--apply]                reconcile project wiring
+  copse new <branch>                  create an isolated worktree
+  copse start <branch> [--agent name] create/find it and launch an agent
+  copse claim <branch> [options]      record owner and dependencies
+  copse release <branch>              mark a feature dependency released
+  copse list [--json]                 worktrees, pull requests and coordination
+  copse verify                        doctor, then configured checks
+  copse land [branch] [--yes]         gate and merge a pull request
+  copse drop <branch>                 safely remove a worktree
+  copse doctor                        validate all project wiring and state
+  copse protect [--apply]             preview/apply GitHub branch protection
+  copse hook <event>                  internal hook forward target
 `;
 
-// Boolean(process.env.COPSE_DEBUG) treats the string "0" as truthy — it is
-// a non-empty string like any other — so COPSE_DEBUG=0, meant to mean "off",
-// turned debug mode on. Only unset, empty, and the literal "0" mean off.
 const DEBUG = !['', '0', undefined].includes(process.env.COPSE_DEBUG);
-
-function die(message) {
-  console.error(`\n✗ ${message}\n`);
-  process.exit(1);
+function die(message) { console.error(`\n✗ ${message}\n`); process.exit(1); }
+function valuesAfter(argv, flag) {
+  const values = [];
+  for (let i = 0; i < argv.length; i += 1) if (argv[i] === flag && argv[i + 1]) values.push(argv[++i]);
+  return values;
 }
 
-const [command, argument] = process.argv.slice(2);
-
-if (command === undefined || command === '--help' || command === '-h') {
-  console.log(USAGE);
-  process.exit(0);
-}
+const argv = process.argv.slice(2);
+const [command, argument] = argv;
+if (!command || command === '--help' || command === '-h') { console.log(USAGE); process.exit(0); }
 
 let repoDir;
-try {
-  repoDir = mainWorktree().path;
-} catch (error) {
-  if (DEBUG) throw error;
-  die(`not inside a git repository: ${error.message}`);
-}
-
+try { repoDir = worktreeRoot(); }
+catch (error) { if (DEBUG) throw error; die(`not inside a git repository: ${error.message}`); }
 const loaded = loadConfig(repoDir);
-if (!loaded.ok) {
-  console.error('\n✗ copse.config.json:');
-  for (const error of loaded.errors) console.error(`  · ${error}`);
-  console.error('');
-  process.exit(1);
-}
+if (!loaded.ok) die(`copse.config.json:\n${loaded.errors.map((error) => `  · ${error}`).join('\n')}`);
 const config = loaded.config;
 
 try {
+  let status = 0;
   switch (command) {
-    case 'new':
-      commandNew(argument, { config });
-      break;
-    case 'list':
-      commandList({ config });
-      break;
-    case 'drop':
-      commandDrop(argument, { config });
-      break;
-    case 'doctor': {
-      const { ok } = commandDoctor({ config });
-      process.exit(ok ? 0 : 1);
+    case 'init': status = commandInit({ config, apply: argv.includes('--apply') }).ok ? 0 : 1; break;
+    case 'new': commandNew(argument, { config }); break;
+    case 'start': {
+      const marker = argv.indexOf('--');
+      const custom = marker === -1 ? null : argv.slice(marker + 1);
+      const agent = valuesAfter(argv, '--agent')[0] ?? 'codex';
+      status = commandStart(argument, { config, agent, command: custom });
       break;
     }
-    default:
-      console.log(USAGE);
-      process.exit(1);
+    case 'claim': commandClaim(argument, { config, owner: valuesAfter(argv, '--owner')[0], dependsOn: valuesAfter(argv, '--depends-on') }); break;
+    case 'release': commandRelease(argument, { config }); break;
+    case 'list': commandList({ config, json: argv.includes('--json') }); break;
+    case 'drop': commandDrop(argument, { config }); break;
+    case 'doctor': status = commandDoctor({ config }).ok ? 0 : 1; break;
+    case 'verify': status = commandVerify({ config }); break;
+    case 'land': commandLand(argument?.startsWith('--') ? null : argument, { config, yes: argv.includes('--yes'), cleanup: !argv.includes('--no-cleanup') }); break;
+    case 'protect': commandProtect({ config, apply: argv.includes('--apply') }); break;
+    case 'hook': commandHook(argument, { config }); break;
+    default: console.log(USAGE); status = 1;
   }
+  process.exit(status ?? 0);
 } catch (error) {
-  // Every user-facing failure is rendered through the same die() path, not
-  // just CopseError refusals — otherwise the most likely first-run failures
-  // (no origin remote, offline, install exiting non-zero, git worktree add
-  // refusing) end in a raw V8 stack trace instead of a message. The stack
-  // stays reachable behind COPSE_DEBUG for anyone debugging copse itself.
-  if (DEBUG) throw error;
+  if (DEBUG && !(error instanceof CopseError)) throw error;
   die(error.message);
 }

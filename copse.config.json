@@ -1,0 +1,19 @@
+{
+  "baseBranch": "main",
+  "branchPrefixes": ["feat", "fix", "docs", "chore"],
+  "carryFiles": [],
+  "carryDirs": [],
+  "install": null,
+  "releaseBranch": null,
+  "verify": [
+    ["npm", "test"],
+    ["npm", "run", "check"],
+    ["npm", "run", "test:package"]
+  ],
+  "agents": {
+    "codex": ["codex"],
+    "claude": ["claude"]
+  },
+  "coordinationFile": ".copse/features.json",
+  "runner": ["node", "src/cli.mjs"]
+}

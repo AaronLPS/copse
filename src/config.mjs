@@ -22,6 +22,11 @@ export const DEFAULTS = Object.freeze({
   carryFiles: Object.freeze([]),
   carryDirs: Object.freeze([]),
   install: null,
+  releaseBranch: null,
+  verify: Object.freeze([]),
+  agents: Object.freeze({ codex: Object.freeze(['codex']), claude: Object.freeze(['claude']) }),
+  coordinationFile: '.copse/features.json',
+  runner: Object.freeze(['npx', '--yes', 'copse']),
 });
 
 function isPlainObject(value) {
@@ -79,9 +84,17 @@ export function parseConfig(raw) {
     carryFiles: [],
     carryDirs: [],
     install: null,
+    releaseBranch: null,
+    verify: [],
+    agents: { codex: ['codex'], claude: ['claude'] },
+    coordinationFile: DEFAULTS.coordinationFile,
+    runner: [...DEFAULTS.runner],
   };
 
-  const known = new Set(['baseBranch', 'branchPrefixes', 'carryFiles', 'carryDirs', 'install']);
+  const known = new Set([
+    'baseBranch', 'branchPrefixes', 'carryFiles', 'carryDirs', 'install',
+    'releaseBranch', 'verify', 'agents', 'coordinationFile', 'runner',
+  ]);
   for (const key of Object.keys(raw)) {
     // An unknown key is almost always a typo, and a typo that is silently
     // ignored looks exactly like a setting that does not work.
@@ -141,6 +154,58 @@ export function parseConfig(raw) {
       // shell and nothing in it can be interpreted as an operator.
       config.install = [...raw.install];
     }
+  }
+
+  if ('releaseBranch' in raw && raw.releaseBranch !== null) {
+    if (typeof raw.releaseBranch !== 'string' || raw.releaseBranch.trim() === '') {
+      errors.push('releaseBranch: must be null or a non-empty string');
+    } else {
+      config.releaseBranch = raw.releaseBranch;
+    }
+  }
+
+  function commandProblem(command, field) {
+    if (!Array.isArray(command) || command.length === 0) return `${field}: every command must be a non-empty argv array`;
+    if (command.some((part) => typeof part !== 'string' || part === '')) return `${field}: every argv element must be a non-empty string`;
+    return null;
+  }
+
+  if ('verify' in raw) {
+    if (!Array.isArray(raw.verify)) errors.push('verify: must be an array of argv arrays');
+    else {
+      for (const command of raw.verify) {
+        const problem = commandProblem(command, 'verify');
+        if (problem) errors.push(problem);
+      }
+      config.verify = raw.verify.map((command) => Array.isArray(command) ? [...command] : command);
+    }
+  }
+
+  if ('agents' in raw) {
+    if (!isPlainObject(raw.agents)) errors.push('agents: must be an object');
+    else {
+      const parsedAgents = {};
+      for (const [name, command] of Object.entries(raw.agents)) {
+        if (!/^[a-z][a-z0-9-]*$/.test(name)) errors.push(`agents: invalid agent name "${name}"`);
+        const problem = commandProblem(command, `agents.${name}`);
+        if (problem) errors.push(problem);
+        else parsedAgents[name] = [...command];
+      }
+      if (Object.keys(parsedAgents).length === 0) errors.push('agents: must declare at least one agent');
+      else config.agents = parsedAgents;
+    }
+  }
+
+  if ('coordinationFile' in raw) {
+    const problem = pathProblem(raw.coordinationFile, 'coordinationFile');
+    if (problem) errors.push(problem);
+    else config.coordinationFile = raw.coordinationFile;
+  }
+
+  if ('runner' in raw) {
+    const problem = commandProblem(raw.runner, 'runner');
+    if (problem) errors.push(problem);
+    else config.runner = [...raw.runner];
   }
 
   return errors.length > 0 ? { ok: false, errors } : { ok: true, config };

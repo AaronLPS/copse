@@ -1,0 +1,16 @@
+export function rulesetPayload(config) {
+  const include = [config.baseBranch, config.releaseBranch].filter(Boolean).map((branch) => `refs/heads/${branch}`);
+  return {
+    name: 'copse protected branches',
+    target: 'branch',
+    enforcement: 'active',
+    conditions: { ref_name: { include, exclude: [] } },
+    rules: [
+      { type: 'deletion' },
+      { type: 'non_fast_forward' },
+      { type: 'pull_request', parameters: { required_approving_review_count: 0, dismiss_stale_reviews_on_push: false, require_code_owner_review: false, require_last_push_approval: false, required_review_thread_resolution: true } },
+      { type: 'required_status_checks', parameters: { strict_required_status_checks_policy: true, required_status_checks: [{ context: 'verify' }] } },
+    ],
+    bypass_actors: [],
+  };
+}

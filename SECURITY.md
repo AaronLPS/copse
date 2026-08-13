@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-copse is pre-1.0 (currently `0.1.0`) and not yet published to npm. Only
+copse is pre-1.0 (currently `0.2.0`) and not yet published to npm. Only
 the latest version is supported — there is no back-porting of fixes to
 older tags.
 
@@ -11,8 +11,8 @@ older tags.
 copse is a CLI that manages git worktrees on your own machine. Three
 things it does are worth naming plainly rather than leaving implicit:
 
-- **It spawns subprocesses.** `git`, and (for `copse list`'s pull-request
-  state) `gh`, are invoked via `execFileSync`.
+- **It spawns subprocesses.** `git`, `gh`, configured verification commands,
+  and agent launchers are invoked directly with argv arrays and no shell.
 - **It runs `install` from the repository's own config, with inherited
   stdio.** If `copse.config.json` sets `install`, `copse new` runs it —
   no confirmation prompt, output going straight to your terminal. This is
@@ -28,6 +28,13 @@ things it does are worth naming plainly rather than leaving implicit:
   (env files, local credentials) that `git worktree add` cannot carry;
   `copse new` copies them in, `copse drop` rescues them back out before
   removing a worktree that holds the only copy.
+- **It installs repository-local Git and agent hooks.** `copse init --apply`
+  writes small forwards whose executable comes from `runner`. Review that argv
+  before applying wiring. Codex additionally requires explicit trust for new
+  or changed non-managed project hooks.
+- **It can call GitHub through authenticated `gh`.** `land --yes` merges a pull
+  request; `protect --apply` creates or updates a repository ruleset. Both have
+  read-only defaults and name their intended mutation before it is requested.
 
 ## What's already defended
 
@@ -64,27 +71,16 @@ things it does are worth naming plainly rather than leaving implicit:
   targets by aiming an ancestor segment at a symlink.
 - Every carry-path refusal is collected and reported together — a bad
   carry path does not silently discard the rest.
-
-## Known limitation
-
-**A symlink nested *inside* a carried directory is not checked, and is
-copied as a live symlink.** `carryPathState` and `escapingAncestor` only
-inspect the carried path itself and its ancestor segments — the checks
-that stop `carryDirs` from being pointed at something outside the tree.
-Once a carried directory clears those checks, `copse new` hands it to
-`cpSync(from, to, { recursive: true })` (`src/commands/new.mjs`) with the
-default `dereference: false`, which copies a symlink found anywhere
-inside that directory as a symlink, verbatim — it does not read through
-it during the copy, but it does plant a live link, pointing at whatever
-it originally pointed at, inside the new worktree. If that link resolves
-outside the tree, anything that later follows it (an editor, a build
-step, a subsequent copy that does dereference) reads or writes through
-it. `copse drop`'s rescue direction has the same gap for the reverse
-copy. Treating a carried directory as fully trusted content — not
-attacker-controlled — is the current mitigation; closing this properly
-means walking the directory tree during the copy rather than only
-checking its root, and is tracked as follow-up work rather than shipped
-today.
+- **Configured install, verify, runner, and agent commands are argv arrays.**
+  They are spawned with shell parsing disabled. Generated shell forwards quote
+  every runner element before appending the fixed hook subcommand.
+- **Coordination writes are atomic and remain inside Git's common directory.**
+  They are immediately shared by all worktrees, do not dirty a branch, and
+  use an exclusive lock to prevent concurrent lost updates.
+- **Carried directories are walked without following links before copying.**
+  A symlink anywhere below a `carryDirs` entry is named and refused in both
+  copy and rescue directions, so recursive copying cannot plant a live link
+  that escapes the repository or worktree later.
 
 ## Reporting a vulnerability
 
