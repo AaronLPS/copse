@@ -40,7 +40,7 @@ export function desiredWiring(config) {
 `;
   const enterRoot = 'cd "$(git rev-parse --show-toplevel)"';
   const hook = (event) => `#!/bin/sh\n${enterRoot} || exit 1\nexec ${forward} hook ${event} "$@"\n`;
-  const agentCommand = (event) => `${enterRoot} && exec ${forward} hook ${event}`;
+  const agentCommand = (event) => `${enterRoot} && exec ${forward} hook ${event} --protocol 1`;
   const agentHooks = (projectRoot) => JSON.stringify({
     hooks: {
       SessionStart: [{ matcher: 'startup|resume|clear|compact', hooks: [{ type: 'command', command: agentCommand('agent-session-start'), additionalContextLimit: 2000 }] }],

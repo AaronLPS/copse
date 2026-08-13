@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { gitHookDecision, agentHookOutput } from '../src/hooks.mjs';
+import { gitHookDecision, agentHookOutput, normalizeAgentEvent } from '../src/hooks.mjs';
 
 const config = { baseBranch: 'main', releaseBranch: null, branchPrefixes: ['feat', 'fix'] };
 
@@ -34,4 +34,30 @@ test('pre-push refuses updating or deleting a protected remote ref', () => {
   const deletion = '(delete) 000 refs/heads/main bbb';
   assert.match(gitHookDecision('pre-push', { branch: 'feat/x', config, updates: [update] }).reason, /protected/);
   assert.match(gitHookDecision('pre-push', { branch: 'feat/x', config, updates: [deletion] }).reason, /protected/);
+});
+
+test('Codex and Claude event field variants normalize to the shared policy', () => {
+  const codex = normalizeAgentEvent({
+    hookEventName: 'PreToolUse',
+    toolName: 'exec_command',
+    toolInput: { cmd: 'git commit -m x' },
+    cwd: '/repo',
+  });
+  const claude = normalizeAgentEvent({
+    hook_event_name: 'PreToolUse',
+    tool_name: 'Bash',
+    tool_input: { command: 'git commit -m x' },
+    cwd: '/repo',
+  });
+  for (const input of [codex, claude]) {
+    const output = agentHookOutput(input, { config, mainPath: '/repo', branch: 'main', worktreePath: '/repo' });
+    assert.equal(output.hookSpecificOutput.permissionDecision, 'deny');
+  }
+});
+
+test('unified exec argv mutations are recognized without shell parsing', () => {
+  const output = agentHookOutput({
+    event: 'PreToolUse', tool: 'unified_exec', input: { argv: ['git', 'push', 'origin', 'main'] }, cwd: '/repo',
+  }, { config, mainPath: '/repo', branch: 'main', worktreePath: '/repo' });
+  assert.equal(output.hookSpecificOutput.permissionDecision, 'deny');
 });

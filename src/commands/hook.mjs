@@ -18,6 +18,9 @@ export function commandHook(event, { cwd = process.cwd(), config, inputText } = 
     return {};
   }
   const input = JSON.parse(inputText ?? readFileSync(0, 'utf8'));
+  if (!input.hook_event_name && !input.hookEventName && !input.event) {
+    input.hook_event_name = event === 'agent-session-start' ? 'SessionStart' : 'PreToolUse';
+  }
   const entry = currentEntry(input.cwd ?? cwd);
   const main = mainWorktree({ cwd: input.cwd ?? cwd });
   const branch = entry?.branch ?? null;

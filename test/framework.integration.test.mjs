@@ -139,3 +139,14 @@ test('start automatically claims a feature and refuses a duplicate live session'
     assert.equal(state.leases['feat/session'], undefined);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test('doctor reports a configured local hook runner that cannot execute', () => {
+  const { root, repo } = makeRepo();
+  try {
+    const config = parseConfig({ verify: [['npm', 'test']], runner: ['./missing-copse'] }).config;
+    commandInit({ cwd: repo, config, apply: true });
+    const result = commandDoctor({ cwd: repo, config });
+    assert.equal(result.ok, false);
+    assert.match(result.findings.join('\n'), /runner.*missing-copse/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

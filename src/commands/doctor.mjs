@@ -5,8 +5,8 @@
  * Collects worktree, carried-path, generated-forward, hook-path and CI findings
  * in one pass and exits non-zero if any are present.
  */
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { accessSync, constants, existsSync, readFileSync } from 'node:fs';
+import { isAbsolute, join, resolve } from 'node:path';
 
 import { carryPathState, git, mainWorktree, worktreeRoot, worktrees } from '../git.mjs';
 import { driftNote } from '../decisions.mjs';
@@ -50,6 +50,15 @@ export function commandDoctor({ cwd = process.cwd(), config }) {
     }
     const hooksPath = git(['config', '--local', '--get', 'core.hooksPath'], { cwd: wiringRoot, allowFailure: true });
     if (hooksPath !== '.githooks') findings.push('git core.hooksPath is not .githooks');
+    const runner = config.runner?.[0];
+    if (runner?.includes('/') || isAbsolute(runner ?? '')) {
+      const runnerPath = isAbsolute(runner) ? runner : resolve(wiringRoot, runner);
+      try {
+        accessSync(runnerPath, constants.X_OK);
+      } catch {
+        findings.push(`configured hook runner is not executable: ${runner}`);
+      }
+    }
   }
 
   console.log('');
