@@ -43,6 +43,7 @@ export async function commandStart(branch, {
   processAlive = processIsAlive,
   now = Date.now,
   leaseId = randomUUID(),
+  resources = [],
 } = {}) {
   if (!branch) throw new CopseError('usage: copse start <branch> [--agent codex|claude] [-- <command...>]');
   const parsed = parseBranchName(branch, config);
@@ -56,7 +57,7 @@ export async function commandStart(branch, {
     entry = { path: created.path, branch };
   }
 
-  const statePath = coordinationStatePath({ cwd });
+  const statePath = coordinationStatePath({ cwd, config });
   const timeoutMs = config.leaseTimeoutSeconds * 1_000;
   const host = hostname();
   updateCoordination(statePath, (state) => {
@@ -76,6 +77,7 @@ export async function commandStart(branch, {
       now: now(),
       timeoutMs,
       processAlive,
+      resources: [...(config.resources[branch] ?? []), ...resources],
     });
   });
 

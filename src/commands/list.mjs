@@ -15,7 +15,7 @@ import { coordinationStatePath, featureBlockers, loadCoordination } from '../coo
 export function commandList({ cwd = process.cwd(), config, json = false }) {
   const entries = worktrees({ cwd });
   const repoDir = entries.find((entry) => entry.isMain).path;
-  const coordination = loadCoordination(coordinationStatePath({ cwd }));
+  const coordination = loadCoordination(coordinationStatePath({ cwd, config }));
   const parent = dirname(repoDir);
   let drifted = 0;
 
@@ -26,7 +26,7 @@ export function commandList({ cwd = process.cwd(), config, json = false }) {
       blockedBy: entry.branch ? featureBlockers(coordination, entry.branch) : [],
       lease: entry.branch ? coordination.leases[entry.branch] ?? null : null,
     }));
-    console.log(JSON.stringify({ version: 1, worktrees: snapshot, features: coordination.features }, null, 2));
+    console.log(JSON.stringify({ version: 1, worktrees: snapshot, features: coordination.features, resources: coordination.resources }, null, 2));
     return snapshot;
   }
 
@@ -85,6 +85,10 @@ export function commandList({ cwd = process.cwd(), config, json = false }) {
     if (lease) {
       console.log(`  ${''.padEnd(38)} active session ${lease.owner}${lease.label ? ` (${lease.label})` : ''}`);
     }
+    const resources = entry.branch
+      ? Object.entries(coordination.resources).filter(([, value]) => value.branch === entry.branch).map(([name]) => name)
+      : [];
+    if (resources.length) console.log(`  ${''.padEnd(38)} resources ${resources.join(', ')}`);
   }
 
   console.log(

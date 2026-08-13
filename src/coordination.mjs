@@ -1,6 +1,6 @@
-import { closeSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { gitCommonDir } from './git.mjs';
+import { gitCommonDir, worktreeRoot } from './git.mjs';
 
 function clone(state) { return JSON.parse(JSON.stringify(state)); }
 
@@ -39,7 +39,7 @@ export function releaseFeature(state, branch) {
   const next = normalizeCoordination(state);
   if (!next.features[branch]) throw new Error(`${branch} is not claimed`);
   next.features[branch].status = 'released';
-  return next;
+  return releaseResources(next, branch, {});
 }
 
 export function featureBlockers(state, branch) {
@@ -73,6 +73,7 @@ export function acquireLease(state, branch, {
   now = Date.now(),
   timeoutMs,
   processAlive = () => true,
+  resources = [],
 }) {
   const next = normalizeCoordination(state);
   const existing = next.leases[branch];
@@ -90,7 +91,7 @@ export function acquireLease(state, branch, {
     heartbeatAt: now,
     timeoutMs,
   };
-  return next;
+  return reserveResources(next, branch, resources, { owner, leaseId: id });
 }
 
 export function refreshLease(state, branch, leaseId, { now = Date.now(), childPid } = {}) {
@@ -108,6 +109,28 @@ export function releaseLease(state, branch, leaseId) {
   if (!lease) return next;
   if (lease.id !== leaseId) throw new Error(`${branch} lease changed before release`);
   delete next.leases[branch];
+  return releaseResources(next, branch, { leaseId });
+}
+
+export function reserveResources(state, branch, names, { owner, leaseId = null } = {}) {
+  const next = normalizeCoordination(state);
+  for (const name of [...new Set(names)]) {
+    const existing = next.resources[name];
+    if (existing && existing.branch !== branch) {
+      throw new Error(`${name} is reserved by ${existing.branch} (${existing.owner})`);
+    }
+    if (!existing) next.resources[name] = { branch, owner, leaseId };
+  }
+  return next;
+}
+
+export function releaseResources(state, branch, { leaseId } = {}) {
+  const next = normalizeCoordination(state);
+  for (const [name, reservation] of Object.entries(next.resources)) {
+    if (reservation.branch !== branch) continue;
+    if (leaseId !== undefined && reservation.leaseId !== leaseId) continue;
+    delete next.resources[name];
+  }
   return next;
 }
 
@@ -148,6 +171,16 @@ export function updateCoordination(path, updater) {
   }
 }
 
-export function coordinationStatePath({ cwd = process.cwd() } = {}) {
-  return `${gitCommonDir({ cwd })}/copse/features.json`;
+export function coordinationStatePath({ cwd = process.cwd(), config } = {}) {
+  const relative = config?.coordinationFile ?? '.copse/features.json';
+  let root = null;
+  try { root = worktreeRoot({ cwd }); } catch { /* bare repositories have no committed seed */ }
+  if (config?.coordinationBackend === 'committed') {
+    if (!root) throw new Error('committed coordination requires a working tree');
+    return `${root}/${relative}`;
+  }
+  const path = `${gitCommonDir({ cwd })}/copse/features.json`;
+  const seed = root ? `${root}/${relative}` : null;
+  if (!existsSync(path) && seed && existsSync(seed)) saveCoordination(path, loadCoordination(seed));
+  return path;
 }

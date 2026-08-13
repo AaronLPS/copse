@@ -43,7 +43,7 @@ export function commandLand(branch, { cwd = process.cwd(), config, yes = false, 
     if (created.status !== 0) throw new CopseError(`GitHub could not create a pull request for ${branch}`);
     pr = pullRequestStatus(branch, { cwd: entry.path, run });
   }
-  const coordinationPath = coordinationStatePath({ cwd });
+  const coordinationPath = coordinationStatePath({ cwd, config });
   const coordination = loadCoordination(coordinationPath);
   const blockers = landBlockers({
     legal: parseBranchName(branch, config).ok,

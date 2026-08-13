@@ -15,7 +15,7 @@ import { commandNew } from '../src/commands/new.mjs';
 import { commandRelease } from '../src/commands/release.mjs';
 import { commandStart } from '../src/commands/start.mjs';
 import { commandVerify } from '../src/commands/verify.mjs';
-import { coordinationStatePath, loadCoordination } from '../src/coordination.mjs';
+import { coordinationStatePath, loadCoordination, saveCoordination } from '../src/coordination.mjs';
 
 process.env.GIT_CONFIG_GLOBAL = '/dev/null';
 process.env.GIT_CONFIG_SYSTEM = '/dev/null';
@@ -148,5 +148,34 @@ test('doctor reports a configured local hook runner that cannot execute', () => 
     const result = commandDoctor({ cwd: repo, config });
     assert.equal(result.ok, false);
     assert.match(result.findings.join('\n'), /runner.*missing-copse/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('committed coordination backend writes the configured reviewed state file', () => {
+  const { root, repo } = makeRepo();
+  try {
+    const config = parseConfig({ coordinationBackend: 'committed', coordinationFile: '.copse/shared.json' }).config;
+    commandClaim('feat/shared', { cwd: repo, config, owner: 'alice', resources: ['port:3000'] });
+    const path = join(repo, '.copse', 'shared.json');
+    const state = JSON.parse(readFileSync(path, 'utf8'));
+    assert.equal(state.features['feat/shared'].owner, 'alice');
+    assert.equal(state.resources['port:3000'].branch, 'feat/shared');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('doctor reports a resource whose owning lease no longer exists', () => {
+  const { root, repo } = makeRepo();
+  try {
+    const config = parseConfig({ verify: [['npm', 'test']] }).config;
+    commandInit({ cwd: repo, config, apply: true });
+    const path = coordinationStatePath({ cwd: repo, config });
+    saveCoordination(path, {
+      version: 1,
+      features: { 'feat/gone': { owner: 'alice', dependsOn: [], status: 'active' } },
+      leases: {},
+      resources: { 'port:3000': { branch: 'feat/gone', owner: 'alice', leaseId: 'missing' } },
+    });
+    const result = commandDoctor({ cwd: repo, config });
+    assert.match(result.findings.join('\n'), /stale resource.*port:3000/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

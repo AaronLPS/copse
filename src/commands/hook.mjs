@@ -24,7 +24,7 @@ export function commandHook(event, { cwd = process.cwd(), config, inputText } = 
   const entry = currentEntry(input.cwd ?? cwd);
   const main = mainWorktree({ cwd: input.cwd ?? cwd });
   const branch = entry?.branch ?? null;
-  const coordination = loadCoordination(coordinationStatePath({ cwd: input.cwd ?? cwd }));
+  const coordination = loadCoordination(coordinationStatePath({ cwd: input.cwd ?? cwd, config }));
   const output = agentHookOutput(input, {
     config,
     mainPath: main.path,

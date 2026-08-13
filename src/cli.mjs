@@ -65,10 +65,11 @@ try {
       const custom = marker === -1 ? null : argv.slice(marker + 1);
       const agent = valuesAfter(argv, '--agent')[0] ?? 'codex';
       const owner = valuesAfter(argv, '--owner')[0];
-      status = await commandStart(argument, { config, agent, command: custom, owner });
+      const optionArgv = argv.slice(0, marker === -1 ? argv.length : marker);
+      status = await commandStart(argument, { config, agent, command: custom, owner, resources: valuesAfter(optionArgv, '--resource') });
       break;
     }
-    case 'claim': commandClaim(argument, { config, owner: valuesAfter(argv, '--owner')[0], dependsOn: valuesAfter(argv, '--depends-on') }); break;
+    case 'claim': commandClaim(argument, { config, owner: valuesAfter(argv, '--owner')[0], dependsOn: valuesAfter(argv, '--depends-on'), resources: valuesAfter(argv, '--resource') }); break;
     case 'release': commandRelease(argument, { config }); break;
     case 'list': commandList({ config, json: argv.includes('--json') }); break;
     case 'drop': commandDrop(argument, { config }); break;

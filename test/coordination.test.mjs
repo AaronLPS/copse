@@ -11,6 +11,8 @@ import {
   leaseStatus,
   normalizeCoordination,
   refreshLease,
+  releaseResources,
+  reserveResources,
   releaseFeature,
   releaseLease,
   updateCoordination,
@@ -90,4 +92,19 @@ test('lease expiry, refresh and id-scoped release are deterministic', () => {
   assert.equal(state.leases['feat/x'].childPid, 20);
   assert.throws(() => releaseLease(state, 'feat/x', 'other'), /lease changed/);
   assert.equal(releaseLease(state, 'feat/x', 'one').leases['feat/x'], undefined);
+});
+
+test('two features cannot reserve the same shared resource', () => {
+  const first = reserveResources(empty(), 'feat/api', ['port:3000'], { owner: 'api', leaseId: 'one' });
+  assert.throws(() => reserveResources(first, 'feat/ui', ['port:3000'], { owner: 'ui', leaseId: 'two' }), /feat\/api.*api/);
+  const released = releaseResources(first, 'feat/api', { leaseId: 'one' });
+  assert.equal(released.resources['port:3000'], undefined);
+});
+
+test('releasing one lease does not remove a persistent feature reservation', () => {
+  let state = reserveResources(empty(), 'feat/api', ['db:test'], { owner: 'api' });
+  state = reserveResources(state, 'feat/api', ['db:test'], { owner: 'api', leaseId: 'lease' });
+  state = releaseResources(state, 'feat/api', { leaseId: 'lease' });
+  assert.equal(state.resources['db:test'].branch, 'feat/api');
+  assert.equal(state.resources['db:test'].leaseId, null);
 });

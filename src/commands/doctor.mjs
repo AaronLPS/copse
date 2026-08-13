@@ -12,6 +12,7 @@ import { carryPathState, git, mainWorktree, worktreeRoot, worktrees } from '../g
 import { driftNote } from '../decisions.mjs';
 import { CONFIG_FILENAME } from '../config.mjs';
 import { desiredWiring, wiringMatches } from '../wiring.mjs';
+import { coordinationStatePath, loadCoordination } from '../coordination.mjs';
 
 export function commandDoctor({ cwd = process.cwd(), config }) {
   const findings = [];
@@ -40,6 +41,15 @@ export function commandDoctor({ cwd = process.cwd(), config }) {
   for (const entry of worktrees({ cwd })) {
     const note = driftNote(entry, config, { repoDir });
     if (note !== null) findings.push(`${entry.path}: ${note.replace(/^⚠ /, '')}`);
+  }
+
+  const coordination = loadCoordination(coordinationStatePath({ cwd, config }));
+  for (const [name, reservation] of Object.entries(coordination.resources)) {
+    if (!reservation.leaseId) continue;
+    const lease = coordination.leases[reservation.branch];
+    if (!lease || lease.id !== reservation.leaseId) {
+      findings.push(`stale resource reservation ${name}: owning lease no longer exists`);
+    }
   }
 
   if (existsSync(join(wiringRoot, CONFIG_FILENAME))) {
