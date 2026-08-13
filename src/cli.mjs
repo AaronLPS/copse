@@ -57,7 +57,8 @@ try {
       const marker = argv.indexOf('--');
       const custom = marker === -1 ? null : argv.slice(marker + 1);
       const agent = valuesAfter(argv, '--agent')[0] ?? 'codex';
-      status = commandStart(argument, { config, agent, command: custom });
+      const owner = valuesAfter(argv, '--owner')[0];
+      status = await commandStart(argument, { config, agent, command: custom, owner });
       break;
     }
     case 'claim': commandClaim(argument, { config, owner: valuesAfter(argv, '--owner')[0], dependsOn: valuesAfter(argv, '--depends-on') }); break;

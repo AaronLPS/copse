@@ -13,6 +13,7 @@ import { commandHook } from '../src/commands/hook.mjs';
 import { commandLand } from '../src/commands/land.mjs';
 import { commandNew } from '../src/commands/new.mjs';
 import { commandRelease } from '../src/commands/release.mjs';
+import { commandStart } from '../src/commands/start.mjs';
 import { commandVerify } from '../src/commands/verify.mjs';
 import { coordinationStatePath, loadCoordination } from '../src/coordination.mjs';
 
@@ -99,5 +100,42 @@ test('init and verify operate on the current linked worktree, not stale main fil
     const status = commandVerify({ cwd: target, config, run(command, args, options) { checkedCwd = options.cwd; return { status: 0 }; } });
     assert.equal(status, 0);
     assert.equal(checkedCwd, target);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('start automatically claims a feature and refuses a duplicate live session', async () => {
+  const { root, repo } = makeRepo();
+  try {
+    const config = parseConfig({ verify: [['npm', 'test']] }).config;
+    commandNew('feat/session', { cwd: repo, config });
+    let finish;
+    const running = new Promise((resolve) => { finish = resolve; });
+    const first = commandStart('feat/session', {
+      cwd: repo,
+      config,
+      owner: 'alice@host',
+      command: ['agent'],
+      processAlive: () => true,
+      run(command, args, options) {
+        options.onSpawn(4242);
+        return running;
+      },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    await assert.rejects(commandStart('feat/session', {
+      cwd: repo,
+      config,
+      owner: 'alice@host',
+      command: ['agent'],
+      processAlive: () => true,
+      run: async () => 0,
+    }), /active session/);
+    let state = loadCoordination(coordinationStatePath({ cwd: repo }));
+    assert.equal(state.features['feat/session'].owner, 'alice@host');
+    assert.equal(state.leases['feat/session'].childPid, 4242);
+    finish(0);
+    assert.equal(await first, 0);
+    state = loadCoordination(coordinationStatePath({ cwd: repo }));
+    assert.equal(state.leases['feat/session'], undefined);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
