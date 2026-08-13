@@ -21,7 +21,7 @@ export function desiredWiring(config) {
     },
     ...(projectRoot ? { $schema: 'https://json.schemastore.org/claude-code-settings.json' } : {}),
   }, null, 2) + '\n';
-  const workflow = `name: copse\n\non:\n  pull_request:\n  push:\n    branches: [${config.baseBranch ?? 'main'}]\n\npermissions:\n  contents: read\n\nconcurrency:\n  group: copse-\${{ github.workflow }}-\${{ github.ref }}\n  cancel-in-progress: true\n\njobs:\n  verify:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 20\n      - run: npm install\n      - run: ${forward} verify\n`;
+  const workflow = `name: copse\n\non:\n  pull_request:\n  push:\n    branches: [${config.baseBranch ?? 'main'}]\n\npermissions:\n  contents: read\n\nconcurrency:\n  group: copse-\${{ github.workflow }}-\${{ github.ref }}\n  cancel-in-progress: true\n\njobs:\n  verify:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 20\n      - run: npm install\n      - run: git config core.hooksPath .githooks\n      - run: ${forward} verify\n`;
   const state = JSON.stringify({ version: 1, features: {} }, null, 2) + '\n';
   const files = new Map([
     ['.githooks/pre-commit', hook('pre-commit')],

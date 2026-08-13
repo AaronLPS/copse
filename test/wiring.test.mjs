@@ -13,6 +13,7 @@ test('desired wiring covers Git, Codex, Claude, instructions, coordination and C
   }
   assert.match(files.get('.githooks/pre-commit'), /git rev-parse --show-toplevel/);
   assert.match(files.get('.codex/hooks.json'), /git rev-parse --show-toplevel/);
+  assert.match(files.get('.github/workflows/copse.yml'), /git config core\.hooksPath \.githooks/);
 });
 
 test('reconcile reports conflicts and apply never overwrites them', () => {
