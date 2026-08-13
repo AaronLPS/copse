@@ -118,6 +118,17 @@ test('framework configuration has safe defaults', () => {
   assert.equal(config.leaseHeartbeatSeconds, 30);
   assert.deepEqual(config.resources, {});
   assert.equal(config.coordinationBackend, 'local');
+  assert.equal(config.ciMode, 'auto');
+  assert.deepEqual(config.ciSetup, []);
+});
+
+test('CI mode and custom setup use explicit safe argv arrays', () => {
+  assert.equal(parseConfig({ ciMode: 'deno' }).ok, false);
+  assert.equal(parseConfig({ ciSetup: ['echo setup'] }).ok, false);
+  assert.equal(parseConfig({ ciSetup: [[]] }).ok, false);
+  const result = parseConfig({ ciMode: 'custom', ciSetup: [['python', '-m', 'pip', 'install', '-r', 'requirements.txt']] });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.config.ciSetup[0], ['python', '-m', 'pip', 'install', '-r', 'requirements.txt']);
 });
 
 test('verify and agent commands must be non-empty argv arrays', () => {

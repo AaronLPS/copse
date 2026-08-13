@@ -51,7 +51,12 @@ const config = loaded.config;
 try {
   let status = 0;
   switch (command) {
-    case 'init': status = commandInit({ config, apply: argv.includes('--apply') }).ok ? 0 : 1; break;
+    case 'init': {
+      const ciMode = valuesAfter(argv, '--ci')[0];
+      const initConfig = ciMode ? { ...config, ciMode } : config;
+      status = commandInit({ config: initConfig, apply: argv.includes('--apply') }).ok ? 0 : 1;
+      break;
+    }
     case 'new': commandNew(argument, { config }); break;
     case 'start': {
       const marker = argv.indexOf('--');

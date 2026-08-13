@@ -53,9 +53,20 @@ export function commandNew(branch, { cwd = process.cwd(), config }) {
   const existing = worktrees({ cwd }).find((entry) => entry.branch === branch);
   if (existing) throw new CopseError(`${branch} is already checked out at ${existing.path}`);
 
-  const base = `origin/${config.baseBranch}`;
-  console.log(`\n→ fetching, so ${base} is current`);
-  git(['fetch', '--prune', 'origin'], { cwd: repoDir });
+  const remoteBase = `refs/remotes/origin/${config.baseBranch}`;
+  const hasRemoteBase = git(['rev-parse', '--verify', remoteBase], { cwd: repoDir, allowFailure: true }) !== null;
+  let base;
+  if (hasRemoteBase) {
+    base = `origin/${config.baseBranch}`;
+    console.log(`\n→ fetching, so ${base} is current`);
+    git(['fetch', '--prune', 'origin'], { cwd: repoDir });
+  } else {
+    base = config.baseBranch;
+    if (git(['rev-parse', '--verify', `refs/heads/${base}`], { cwd: repoDir, allowFailure: true }) === null) {
+      throw new CopseError(`neither origin/${base} nor a local ${base} branch exists`);
+    }
+    console.log(`\n→ no origin/${base}; using the local ${base} branch`);
+  }
 
   console.log(`→ ${target}  (${branch} from ${base})`);
   git(['worktree', 'add', target, '-b', branch, base], { cwd: repoDir });

@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { desiredWiring, reconcileWiring } from '../src/wiring.mjs';
+import { desiredWiring, detectCiMode, reconcileWiring } from '../src/wiring.mjs';
 
 test('desired wiring covers Git, Codex, Claude, instructions, coordination and CI', () => {
   const files = desiredWiring({ verify: [['npm', 'test']] });
@@ -38,5 +38,24 @@ test('reconcile merges copse hooks into existing agent settings', () => {
     assert.deepEqual(settings.permissions, { allow: ['Read'] });
     assert.ok(settings.hooks.SessionStart);
     assert.ok(report.updated.includes('.claude/settings.json'));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('CI mode detection follows lockfiles and custom workflows avoid npm install', () => {
+  const root = mkdtempSync(join(tmpdir(), 'copse-wire-'));
+  try {
+    writeFileSync(join(root, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n');
+    assert.equal(detectCiMode(root), 'pnpm');
+    const config = {
+      baseBranch: 'main',
+      verify: [['python', '-m', 'pytest']],
+      runner: ['copse'],
+      coordinationFile: '.copse/features.json',
+      ciMode: 'custom',
+      ciSetup: [['python', '-m', 'pip', 'install', '-r', 'requirements.txt']],
+    };
+    const workflow = desiredWiring(config).get('.github/workflows/copse.yml');
+    assert.match(workflow, /python -m pip install -r requirements\.txt/);
+    assert.doesNotMatch(workflow, /npm install/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

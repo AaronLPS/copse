@@ -31,6 +31,8 @@ export const DEFAULTS = Object.freeze({
   leaseHeartbeatSeconds: 30,
   resources: Object.freeze({}),
   coordinationBackend: 'local',
+  ciMode: 'auto',
+  ciSetup: Object.freeze([]),
 });
 
 function isPlainObject(value) {
@@ -97,12 +99,15 @@ export function parseConfig(raw) {
     leaseHeartbeatSeconds: DEFAULTS.leaseHeartbeatSeconds,
     resources: {},
     coordinationBackend: DEFAULTS.coordinationBackend,
+    ciMode: DEFAULTS.ciMode,
+    ciSetup: [],
   };
 
   const known = new Set([
     'baseBranch', 'branchPrefixes', 'carryFiles', 'carryDirs', 'install',
     'releaseBranch', 'verify', 'agents', 'coordinationFile', 'runner',
     'leaseTimeoutSeconds', 'leaseHeartbeatSeconds', 'resources', 'coordinationBackend',
+    'ciMode', 'ciSetup',
   ]);
   for (const key of Object.keys(raw)) {
     // An unknown key is almost always a typo, and a typo that is silently
@@ -260,6 +265,26 @@ export function parseConfig(raw) {
       errors.push('coordinationBackend: must be "local" or "committed"');
     } else {
       config.coordinationBackend = raw.coordinationBackend;
+    }
+  }
+
+  if ('ciMode' in raw) {
+    if (!['auto', 'npm', 'pnpm', 'yarn', 'custom', 'none'].includes(raw.ciMode)) {
+      errors.push('ciMode: must be auto, npm, pnpm, yarn, custom, or none');
+    } else {
+      config.ciMode = raw.ciMode;
+    }
+  }
+
+  if ('ciSetup' in raw) {
+    if (!Array.isArray(raw.ciSetup)) {
+      errors.push('ciSetup: must be an array of argv arrays');
+    } else {
+      for (const command of raw.ciSetup) {
+        const problem = commandProblem(command, 'ciSetup');
+        if (problem) errors.push(problem);
+      }
+      config.ciSetup = raw.ciSetup.map((command) => Array.isArray(command) ? [...command] : command);
     }
   }
 
