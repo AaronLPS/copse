@@ -31,7 +31,8 @@
     "test": "node --test test/*.mjs",
     "test:coverage": "node --test --experimental-test-coverage test/*.mjs",
     "check": "node scripts/check-syntax.mjs",
-    "test:package": "node scripts/package-smoke.mjs"
+    "test:package": "node scripts/package-smoke.mjs",
+    "test:agents:live": "node scripts/live-agent-smoke.mjs"
   },
   "license": "MIT"
 }
