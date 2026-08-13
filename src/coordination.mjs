@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { dirname } from 'node:path';
 import { gitCommonDir, worktreeRoot } from './git.mjs';
@@ -179,6 +179,31 @@ function staleLock(path, {
   return record?.host === host && !processAlive(record.pid);
 }
 
+function ensureLockDirectory(lockPath, statePath, options) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      mkdirSync(lockPath);
+      return;
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+    }
+
+    let stat;
+    try { stat = lstatSync(lockPath); }
+    catch (error) { if (error.code === 'ENOENT') continue; else throw error; }
+    if (stat.isDirectory()) return;
+    if (!staleLock(lockPath, options)) {
+      throw new Error(`coordination state is being updated: ${statePath}`);
+    }
+    try { unlinkSync(lockPath); }
+    catch (error) {
+      if (['ENOENT', 'EISDIR', 'EPERM'].includes(error.code)) continue;
+      throw error;
+    }
+  }
+  throw new Error(`coordination state is being updated: ${statePath}`);
+}
+
 export function updateCoordination(path, updater, {
   now = Date.now(),
   host = hostname(),
@@ -187,7 +212,7 @@ export function updateCoordination(path, updater, {
 } = {}) {
   mkdirSync(dirname(path), { recursive: true });
   const lockPath = `${path}.lock`;
-  mkdirSync(lockPath, { recursive: true });
+  ensureLockDirectory(lockPath, path, { now, host, processAlive, lockTimeoutMs });
   const contenderName = `${randomUUID()}.json`;
   const contenderPath = `${lockPath}/${contenderName}`;
   writeFileSync(contenderPath, JSON.stringify({ pid: process.pid, host, createdAt: now }) + '\n', { flag: 'wx' });

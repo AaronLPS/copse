@@ -60,6 +60,21 @@ test('atomic coordination update reclaims a lock owned by a dead local process',
   }
 });
 
+test('a stale legacy lock file migrates to the contender-directory protocol', () => {
+  const root = mkdtempSync(join(tmpdir(), 'copse-coordinate-'));
+  const path = join(root, 'state', 'features.json');
+  mkdirSync(join(root, 'state'));
+  writeFileSync(`${path}.lock`, JSON.stringify({ pid: 404, host: 'test-host', createdAt: 1_000 }));
+  try {
+    const state = updateCoordination(path, (current) => current, {
+      host: 'test-host', now: 2_000, processAlive: () => false,
+    });
+    assert.deepEqual(state.features, {});
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('stale-lock reclamation serializes competing reclaimers', () => {
   const root = mkdtempSync(join(tmpdir(), 'copse-coordinate-'));
   const path = join(root, 'state', 'features.json');
