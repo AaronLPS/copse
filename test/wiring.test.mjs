@@ -42,6 +42,54 @@ test('reconcile merges copse hooks into existing agent settings', () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test('reconcile replaces exact previous copse wiring while preserving consumer hook groups', () => {
+  const root = mkdtempSync(join(tmpdir(), 'copse-wire-'));
+  try {
+    const oldConfig = { verify: [['npm', 'test']], runner: ['npx', '--yes', 'copse@0.4.0'] };
+    const newConfig = { verify: [['npm', 'test']], runner: ['npx', '--yes', 'copse@0.5.0'] };
+    const previousDesired = desiredWiring(oldConfig);
+    const desired = desiredWiring(newConfig);
+    const oldSettings = JSON.parse(previousDesired.get('.claude/settings.json'));
+    const consumerGroup = { matcher: 'complete', hooks: [{ type: 'command', command: 'consumer validate' }] };
+    mkdirSync(join(root, '.claude'), { recursive: true });
+    mkdirSync(join(root, '.github', 'workflows'), { recursive: true });
+    writeFileSync(join(root, '.claude/settings.json'), JSON.stringify({
+      hooks: { ...oldSettings.hooks, Stop: [consumerGroup] },
+    }, null, 2) + '\n');
+    writeFileSync(join(root, '.github/workflows/copse.yml'), previousDesired.get('.github/workflows/copse.yml'));
+
+    const report = reconcileWiring(root, desired, { apply: true, previousDesired });
+    const settings = JSON.parse(readFileSync(join(root, '.claude/settings.json'), 'utf8'));
+    const wanted = JSON.parse(desired.get('.claude/settings.json'));
+    assert.deepEqual(settings.hooks.Stop, [consumerGroup]);
+    assert.deepEqual(settings.hooks.SessionStart, wanted.hooks.SessionStart);
+    assert.deepEqual(settings.hooks.PreToolUse, wanted.hooks.PreToolUse);
+    assert.doesNotMatch(JSON.stringify(settings), /copse@0\.4\.0/);
+    assert.match(JSON.stringify(settings), /copse@0\.5\.0/);
+    assert.equal(readFileSync(join(root, '.github/workflows/copse.yml'), 'utf8'), desired.get('.github/workflows/copse.yml'));
+    assert.ok(report.updated.includes('.claude/settings.json'));
+    assert.ok(report.updated.includes('.github/workflows/copse.yml'));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('reconcile leaves a custom old-runner workflow unchanged as a conflict', () => {
+  const root = mkdtempSync(join(tmpdir(), 'copse-wire-'));
+  try {
+    const oldConfig = { verify: [['npm', 'test']], runner: ['npx', '--yes', 'copse@0.4.0'] };
+    const newConfig = { verify: [['npm', 'test']], runner: ['npx', '--yes', 'copse@0.5.0'] };
+    const previousDesired = desiredWiring(oldConfig);
+    const desired = desiredWiring(newConfig);
+    const path = join(root, '.github/workflows/copse.yml');
+    const custom = `${previousDesired.get('.github/workflows/copse.yml')}# consumer-owned customization\n`;
+    mkdirSync(join(root, '.github', 'workflows'), { recursive: true });
+    writeFileSync(path, custom);
+
+    const report = reconcileWiring(root, desired, { apply: true, previousDesired });
+    assert.ok(report.conflicts.includes('.github/workflows/copse.yml'));
+    assert.equal(readFileSync(path, 'utf8'), custom);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('CI mode detection follows lockfiles and custom workflows avoid npm install', () => {
   const root = mkdtempSync(join(tmpdir(), 'copse-wire-'));
   try {

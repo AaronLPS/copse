@@ -52,6 +52,36 @@ test('init apply creates idempotent wiring that doctor accepts', () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test('init runner package creates a config when one is absent', () => {
+  const { root, repo } = makeRepo();
+  try {
+    const config = parseConfig({ verify: [['npm', 'test']] }).config;
+    commandInit({
+      cwd: repo, config, apply: true, runnerPackage: 'github:AaronLPS/copse#b928453',
+    });
+    const saved = JSON.parse(readFileSync(join(repo, 'copse.config.json'), 'utf8'));
+    assert.deepEqual(saved.runner, ['npx', '--yes', 'github:AaronLPS/copse#b928453']);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('init runner package persists the exact package source', () => {
+  const { root, repo } = makeRepo();
+  try {
+    writeFileSync(join(repo, 'copse.config.json'), JSON.stringify({
+      baseBranch: 'main', carryFiles: ['.env'], verify: [['npm', 'test']], runner: ['old-runner'],
+    }, null, 2) + '\n');
+    writeFileSync(join(repo, '.env'), 'secret\n');
+    const loaded = parseConfig(JSON.parse(readFileSync(join(repo, 'copse.config.json'), 'utf8'))).config;
+    const result = commandInit({
+      cwd: repo, config: loaded, apply: true, runnerPackage: 'github:AaronLPS/copse#b928453',
+    });
+    const saved = JSON.parse(readFileSync(join(repo, 'copse.config.json'), 'utf8'));
+    assert.deepEqual(saved.runner, ['npx', '--yes', 'github:AaronLPS/copse#b928453']);
+    assert.deepEqual(saved.carryFiles, ['.env']);
+    assert.equal(result.configChanged, true);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('coordination state is shared immediately across worktrees without dirtying main', () => {
   const { root, repo } = makeRepo();
   try {

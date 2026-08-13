@@ -83,7 +83,10 @@ function includesGroup(groups, wanted) {
 
 export function wiringMatches(relative, actual, expected) {
   if (relative === '.github/workflows/copse.yml') {
-    return actual === expected || (/^\s{2}verify:\s*$/m.test(actual) && /(?:copse|src\/cli\.mjs)[^\n]*\sverify\s*$/m.test(actual));
+    const runner = expected.match(/^\s*- run: (.+) verify\s*$/m)?.[1];
+    const escapedRunner = runner?.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return actual === expected || (escapedRunner !== undefined
+      && new RegExp(`^\\s*- run: ${escapedRunner} verify\\s*$`, 'm').test(actual));
   }
   if (!agentSettingsPath(relative)) return actual === expected;
   const have = parseJson(actual);
@@ -105,7 +108,25 @@ function mergedAgentSettings(actual, expected) {
   return JSON.stringify(merged, null, 2) + '\n';
 }
 
-export function reconcileWiring(root, desired, { apply = false } = {}) {
+function replacedAgentSettings(actual, previous, expected) {
+  const have = parseJson(actual);
+  const old = parseJson(previous);
+  const want = parseJson(expected);
+  if (!have || !old || !want || typeof have !== 'object' || Array.isArray(have)) return null;
+  const merged = { ...have, hooks: { ...(have.hooks ?? {}) } };
+  if (!merged.$schema && want.$schema) merged.$schema = want.$schema;
+  for (const [event, groups] of Object.entries(old.hooks ?? {})) {
+    const encoded = new Set(groups.map((group) => JSON.stringify(group)));
+    merged.hooks[event] = (merged.hooks[event] ?? []).filter((group) => !encoded.has(JSON.stringify(group)));
+  }
+  for (const [event, groups] of Object.entries(want.hooks ?? {})) {
+    merged.hooks[event] = [...(merged.hooks[event] ?? [])];
+    for (const group of groups) if (!includesGroup(merged.hooks[event], group)) merged.hooks[event].push(group);
+  }
+  return JSON.stringify(merged, null, 2) + '\n';
+}
+
+export function reconcileWiring(root, desired, { apply = false, previousDesired = null } = {}) {
   const report = { missing: [], matching: [], conflicts: [], created: [], updated: [] };
   for (const [relative, content] of desired) {
     const path = join(root, relative);
@@ -118,9 +139,17 @@ export function reconcileWiring(root, desired, { apply = false } = {}) {
       }
     } else {
       const actual = readFileSync(path, 'utf8');
+      const previous = previousDesired?.get(relative);
       if (wiringMatches(relative, actual, content)) report.matching.push(relative);
+      else if (apply && previous === actual) {
+        atomicWrite(path, content);
+        if (relative.startsWith('.githooks/')) chmodSync(path, 0o755);
+        report.updated.push(relative);
+      }
       else if (apply && agentSettingsPath(relative)) {
-        const merged = mergedAgentSettings(actual, content);
+        const merged = previous === undefined
+          ? mergedAgentSettings(actual, content)
+          : replacedAgentSettings(actual, previous, content);
         if (merged) { atomicWrite(path, merged); report.updated.push(relative); }
         else report.conflicts.push(relative);
       } else report.conflicts.push(relative);

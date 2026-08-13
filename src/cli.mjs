@@ -14,6 +14,7 @@ import { commandVerify } from './commands/verify.mjs';
 import { commandLand } from './commands/land.mjs';
 import { commandProtect } from './commands/protect.mjs';
 import { commandPr } from './commands/pr.mjs';
+import { runnerPackageFromArgv } from './runner.mjs';
 
 const USAGE = `
   copse init [--apply]                reconcile project wiring
@@ -42,6 +43,7 @@ function valuesAfter(argv, flag) {
 const argv = process.argv.slice(2);
 const [command, argument] = argv;
 if (!command || command === '--help' || command === '-h') { console.log(USAGE); process.exit(0); }
+const runnerPackage = runnerPackageFromArgv(argv);
 
 let repoDir;
 try { repoDir = worktreeRoot(); }
@@ -56,7 +58,7 @@ try {
     case 'init': {
       const ciMode = valuesAfter(argv, '--ci')[0];
       const initConfig = ciMode ? { ...config, ciMode } : config;
-      status = commandInit({ config: initConfig, apply: argv.includes('--apply') }).ok ? 0 : 1;
+      status = commandInit({ config: initConfig, apply: argv.includes('--apply'), runnerPackage }).ok ? 0 : 1;
       break;
     }
     case 'new': commandNew(argument, { config }); break;
