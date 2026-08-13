@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd \"$(git rev-parse --show-toplevel)\" && exec 'node' 'src/cli.mjs' hook agent-session-start",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && exec 'node' 'src/cli.mjs' hook agent-session-start --protocol 1",
             "additionalContextLimit": 2000
           }
         ]
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd \"$(git rev-parse --show-toplevel)\" && exec 'node' 'src/cli.mjs' hook agent-pre-tool-use"
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && exec 'node' 'src/cli.mjs' hook agent-pre-tool-use --protocol 1"
           }
         ]
       }

@@ -1,5 +1,7 @@
 # Finish Parallel-Work Framework Implementation Plan
 
+Status: implemented and verified on 2026-08-13.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Close copse's remaining collision, onboarding, distribution, pull-request, hook, and shared-resource gaps without turning it into a scheduler.
@@ -396,4 +398,3 @@ Commit: `docs: describe completed parallel framework`
 - [ ] **Step 5: Land through the project lifecycle**
 
 Push the branch, create a PR with `copse pr`, run `copse land --yes` after checks are green, and confirm the main worktree fast-forwards cleanly.
-

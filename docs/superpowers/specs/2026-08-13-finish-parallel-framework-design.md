@@ -2,6 +2,8 @@
 
 Date: 2026-08-13
 
+Status: implemented and verified.
+
 ## Goal
 
 Close the remaining gap between copse's worktree lifecycle prototype and a
@@ -142,4 +144,3 @@ resource conflicts, and both coordination backends. Final acceptance requires:
 4. Two different features can run concurrently while a duplicate start is
    refused.
 5. The main worktree remains clean and on `baseBranch` throughout feature work.
-

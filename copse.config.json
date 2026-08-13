@@ -15,5 +15,11 @@
     "claude": ["claude"]
   },
   "coordinationFile": ".copse/features.json",
+  "coordinationBackend": "local",
+  "leaseTimeoutSeconds": 300,
+  "leaseHeartbeatSeconds": 30,
+  "resources": {},
+  "ciMode": "npm",
+  "ciSetup": [],
   "runner": ["node", "src/cli.mjs"]
 }
