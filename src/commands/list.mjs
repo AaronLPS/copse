@@ -24,6 +24,7 @@ export function commandList({ cwd = process.cwd(), config, json = false }) {
       path: entry.path, branch: entry.branch, main: entry.isMain, detached: entry.detached,
       coordination: entry.branch ? coordination.features[entry.branch] ?? null : null,
       blockedBy: entry.branch ? featureBlockers(coordination, entry.branch) : [],
+      lease: entry.branch ? coordination.leases[entry.branch] ?? null : null,
     }));
     console.log(JSON.stringify({ version: 1, worktrees: snapshot, features: coordination.features }, null, 2));
     return snapshot;
@@ -79,6 +80,10 @@ export function commandList({ cwd = process.cwd(), config, json = false }) {
     if (feature) {
       const blocked = featureBlockers(coordination, entry.branch);
       console.log(`  ${''.padEnd(38)} owner ${feature.owner}, ${feature.status}${blocked.length ? `, blocked by ${blocked.join(', ')}` : ''}`);
+    }
+    const lease = entry.branch ? coordination.leases[entry.branch] : null;
+    if (lease) {
+      console.log(`  ${''.padEnd(38)} active session ${lease.owner}${lease.label ? ` (${lease.label})` : ''}`);
     }
   }
 
