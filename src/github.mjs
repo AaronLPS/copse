@@ -16,5 +16,17 @@ export function pullRequestStatus(branch, { cwd, run = runCommand } = {}) {
 }
 
 export function mergePullRequest(branch, { cwd, run = runCommand } = {}) {
-  return run('gh', ['pr', 'merge', branch, '--merge', '--delete-branch'], { cwd, inherit: true, allowFailure: true });
+  return run('gh', ['pr', 'merge', branch, '--merge'], { cwd, inherit: true, allowFailure: true });
+}
+
+export function createPullRequest(branch, {
+  base,
+  draft = false,
+  cwd,
+  run = runCommand,
+} = {}) {
+  const args = ['pr', 'create', '--head', branch, '--base', base];
+  if (draft) args.push('--draft');
+  args.push('--fill');
+  return run('gh', args, { cwd, inherit: true, allowFailure: true });
 }

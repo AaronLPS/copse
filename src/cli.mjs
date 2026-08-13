@@ -13,6 +13,7 @@ import { commandRelease } from './commands/release.mjs';
 import { commandVerify } from './commands/verify.mjs';
 import { commandLand } from './commands/land.mjs';
 import { commandProtect } from './commands/protect.mjs';
+import { commandPr } from './commands/pr.mjs';
 
 const USAGE = `
   copse init [--apply]                reconcile project wiring
@@ -22,6 +23,7 @@ const USAGE = `
   copse release <branch>              mark a feature dependency released
   copse list [--json]                 worktrees, pull requests and coordination
   copse verify                        doctor, then configured checks
+  copse pr [branch] [--draft]         verify and create a pull request
   copse land [branch] [--yes]         gate and merge a pull request
   copse drop <branch>                 safely remove a worktree
   copse doctor                        validate all project wiring and state
@@ -72,7 +74,8 @@ try {
     case 'drop': commandDrop(argument, { config }); break;
     case 'doctor': status = commandDoctor({ config }).ok ? 0 : 1; break;
     case 'verify': status = commandVerify({ config }); break;
-    case 'land': commandLand(argument?.startsWith('--') ? null : argument, { config, yes: argv.includes('--yes'), cleanup: !argv.includes('--no-cleanup') }); break;
+    case 'pr': commandPr(argument?.startsWith('--') ? null : argument, { config, draft: argv.includes('--draft'), verify: !argv.includes('--no-verify') }); break;
+    case 'land': commandLand(argument?.startsWith('--') ? null : argument, { config, yes: argv.includes('--yes'), cleanup: !argv.includes('--no-cleanup'), createPr: argv.includes('--create-pr') }); break;
     case 'protect': commandProtect({ config, apply: argv.includes('--apply') }); break;
     case 'hook': commandHook(argument, { config }); break;
     default: console.log(USAGE); status = 1;
