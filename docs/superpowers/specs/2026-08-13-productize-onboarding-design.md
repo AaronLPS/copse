@@ -44,7 +44,8 @@ npx github:AaronLPS/copse init --apply \
 After npm publication the same interface supports a pinned release:
 
 ```sh
-npx copse@0.4.0 init --apply --runner-package copse@0.4.0
+npx @aaronlps/copse@0.4.0 init --apply \
+  --runner-package @aaronlps/copse@0.4.0
 ```
 
 An explicit value is preferred to unreliable inference from npm's temporary
@@ -63,7 +64,7 @@ versions for releases and an explicit Git commit/tag for GitHub production use.
 
 The bootstrap acceptance test installs the packed artifact in a temporary
 consumer and asserts that every generated forward contains the chosen package
-spec rather than the source checkout or bare `npx copse` default.
+spec rather than the source checkout or default `npx --yes @aaronlps/copse`.
 
 When the runner changes, init replaces only forwards that exactly match the
 previous effective copse configuration. In Codex and Claude settings it removes

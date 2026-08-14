@@ -33,7 +33,7 @@ function ciSetupLines(config) {
 
 export function desiredWiring(config) {
   const quote = (part) => `'${part.replaceAll("'", `'\\''`)}'`;
-  const forward = (config.runner ?? ['npx', '--yes', 'copse']).map(quote).join(' ');
+  const forward = (config.runner ?? ['npx', '--yes', '@aaronlps/copse']).map(quote).join(' ');
   const agentContract = `# copse parallel-work contract
 
 - Keep the main worktree on the configured base branch; do feature work in a copse worktree.

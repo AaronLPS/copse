@@ -254,6 +254,9 @@ try {
   }
 
   const packed = JSON.parse(run('npm', ['pack', '--json', '--pack-destination', temp], { cwd: root }));
+  if (packed[0].name !== '@aaronlps/copse') {
+    throw new Error(`package identity was ${packed[0].name}, expected @aaronlps/copse`);
+  }
   const artifactDir = join(temp, 'artifacts with spaces $;[packed]');
   mkdirSync(artifactDir);
   const artifact = join(artifactDir, packed[0].filename);
@@ -559,8 +562,9 @@ process.exit(result.status ?? 1);
   runCopse(['land', 'feat/land', '--yes']);
   runCopse(['verify']);
 
-  const installed = JSON.parse(readFileSync(join(consumer, 'node_modules', 'copse', 'package.json'), 'utf8'));
-  acceptanceMessage = `package acceptance ok: copse ${installed.version}, ${packed[0].files.length} files`;
+  const installedManifest = join(consumer, 'node_modules', '@aaronlps', 'copse', 'package.json');
+  const installed = JSON.parse(readFileSync(installedManifest, 'utf8'));
+  acceptanceMessage = `package acceptance ok: ${installed.name} ${installed.version}, ${packed[0].files.length} files`;
 } catch (error) {
   if (!(error instanceof CleanupMutationComplete)) throw error;
   cleanupMutationComplete = true;
