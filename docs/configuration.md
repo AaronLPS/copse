@@ -76,8 +76,8 @@ npx github:AaronLPS/copse init --apply \
 After npm publication, select the pinned package release explicitly:
 
 ```sh
-npx @aaronlps/copse@0.4.0 init --apply \
-  --runner-package @aaronlps/copse@0.4.0
+npx @aaronlps/copse@0.4.1 init --apply \
+  --runner-package @aaronlps/copse@0.4.1
 ```
 
 copse itself dogfoods a checkout-local runner:
