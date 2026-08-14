@@ -133,7 +133,17 @@ export function driftNote(entry, config, { repoDir }) {
   return `⚠ expected ${expected}`;
 }
 
-export function landBlockers({ legal, protectedBranch, dirty, unpushed, pr, checksGreen, dependencies = [] }) {
+export function landBlockers({
+  legal,
+  protectedBranch,
+  dirty,
+  unpushed,
+  pr,
+  prBaseMatches = true,
+  prHeadMatches = true,
+  checksGreen,
+  dependencies = [],
+}) {
   const blockers = [];
   if (!legal) blockers.push('branch name is not legal for this repository');
   if (protectedBranch) blockers.push('cannot land a protected branch');
@@ -141,6 +151,8 @@ export function landBlockers({ legal, protectedBranch, dirty, unpushed, pr, chec
   else if (dirty) blockers.push('working tree is dirty');
   if (unpushed > 0) blockers.push(`${unpushed} unpushed commit(s)`);
   if (!pr) blockers.push('no pull request exists for this branch');
+  if (pr && !prBaseMatches) blockers.push('pull request does not target the configured base branch');
+  if (pr && !prHeadMatches) blockers.push('pull request head commit does not match this worktree');
   if (pr && !checksGreen) blockers.push('pull request checks are not green');
   if (dependencies.length) blockers.push(`unreleased dependencies: ${dependencies.join(', ')}`);
   return blockers;

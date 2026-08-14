@@ -3,6 +3,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync
 import { hostname } from 'node:os';
 import { dirname } from 'node:path';
 import { gitCommonDir, worktreeRoot } from './git.mjs';
+import { repositoryFileState } from './path-safety.mjs';
 
 function clone(state) { return JSON.parse(JSON.stringify(state)); }
 
@@ -264,12 +265,16 @@ export function coordinationStatePath({ cwd = process.cwd(), config } = {}) {
   const relative = config?.coordinationFile ?? '.copse/features.json';
   let root = null;
   try { root = worktreeRoot({ cwd }); } catch { /* bare repositories have no committed seed */ }
+  const repositoryState = root ? repositoryFileState(root, relative) : null;
+  if (repositoryState && !repositoryState.safe) {
+    throw new Error(`unsafe coordinationFile ${relative}: ${repositoryState.problem}`);
+  }
   if (config?.coordinationBackend === 'committed') {
     if (!root) throw new Error('committed coordination requires a working tree');
-    return `${root}/${relative}`;
+    return repositoryState.path;
   }
   const path = `${gitCommonDir({ cwd })}/copse/features.json`;
-  const seed = root ? `${root}/${relative}` : null;
+  const seed = repositoryState?.path ?? null;
   if (!existsSync(path) && seed && existsSync(seed)) saveCoordination(path, loadCoordination(seed));
   return path;
 }

@@ -297,12 +297,27 @@ try {
   mkdirSync(fakeBin);
   const fakeGh = join(fakeBin, 'gh');
   writeFileSync(fakeGh, `#!/usr/bin/env node
+import { execFileSync } from 'node:child_process';
 const args = process.argv.slice(2);
+const headOid = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 if (args[0] === 'pr' && args[1] === 'list') {
-  process.stdout.write(JSON.stringify([{ number: 7, state: 'OPEN', statusCheckRollup: [{ conclusion: 'SUCCESS' }] }]));
+  process.stdout.write(JSON.stringify([{
+    number: 7,
+    state: 'OPEN',
+    baseRefName: 'main',
+    headRefOid: headOid,
+    statusCheckRollup: [{ name: 'verify', conclusion: 'SUCCESS' }],
+  }]));
   process.exit(0);
 }
-if (args[0] === 'pr' && args[1] === 'merge') process.exit(0);
+if (args[0] === 'pr' && args[1] === 'merge') {
+  const expected = ['pr', 'merge', '7', '--merge', '--match-head-commit', headOid];
+  if (JSON.stringify(args) !== JSON.stringify(expected)) {
+    process.stderr.write('merge was not bound to verified PR/head: ' + JSON.stringify(args));
+    process.exit(2);
+  }
+  process.exit(0);
+}
 process.stderr.write('unexpected fake gh call: ' + args.join(' '));
 process.exit(2);
 `);

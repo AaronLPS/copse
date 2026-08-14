@@ -313,14 +313,17 @@ test('installed hook policy blocks main edits and land closes a clean simulated 
     assert.throws(() => commandHook('pre-commit', { cwd: repo, config }), /protected/);
     const created = commandNew('feat/done', { cwd: repo, config });
     assert.doesNotThrow(() => commandHook('pre-commit', { cwd: created.path, config }));
+    const headOid = run(['rev-parse', 'HEAD'], created.path);
+    let mergeArgs;
     const fakeGh = (command, args) => {
-      if (args[0] === 'pr' && args[1] === 'list') return { ok: true, status: 0, stdout: JSON.stringify([{ number: 7, state: 'OPEN', statusCheckRollup: [{ conclusion: 'SUCCESS' }] }]), stderr: '' };
-      if (args[0] === 'pr' && args[1] === 'merge') return { ok: true, status: 0, stdout: '', stderr: '' };
+      if (args[0] === 'pr' && args[1] === 'list') return { ok: true, status: 0, stdout: JSON.stringify([{ number: 7, state: 'OPEN', baseRefName: 'main', headRefOid: headOid, statusCheckRollup: [{ name: 'verify', conclusion: 'SUCCESS' }] }]), stderr: '' };
+      if (args[0] === 'pr' && args[1] === 'merge') { mergeArgs = args; return { ok: true, status: 0, stdout: '', stderr: '' }; }
       throw new Error(`unexpected ${command} ${args.join(' ')}`);
     };
     const result = commandLand('feat/done', { cwd: repo, config, yes: true, run: fakeGh });
     assert.equal(result.merged, true);
     assert.equal(result.cleaned, true);
+    assert.deepEqual(mergeArgs, ['pr', 'merge', '7', '--merge', '--match-head-commit', headOid]);
     assert.equal(existsSync(created.path), false);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

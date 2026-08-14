@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -181,6 +183,22 @@ test('reconcile merges copse hooks into existing agent settings', () => {
     assert.ok(settings.hooks.SessionStart);
     assert.ok(report.updated.includes('.claude/settings.json'));
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('reconcile refuses generic wiring beneath a symlinked parent', () => {
+  const base = mkdtempSync(join(tmpdir(), 'copse-wire-symlink-'));
+  const root = join(base, 'repo');
+  const external = join(base, 'external-codex');
+  mkdirSync(root);
+  mkdirSync(external);
+  symlinkSync(external, join(root, '.codex'));
+  try {
+    const desired = new Map([['.codex/hooks.json', '{"hooks":{}}\n']]);
+    const report = reconcileWiring(root, desired, { apply: true });
+
+    assert.deepEqual(report.conflicts, ['.codex/hooks.json']);
+    assert.equal(existsSync(join(external, 'hooks.json')), false);
+  } finally { rmSync(base, { recursive: true, force: true }); }
 });
 
 test('reconcile replaces exact previous copse wiring while preserving consumer hook groups', () => {
