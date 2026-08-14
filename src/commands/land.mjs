@@ -86,6 +86,7 @@ export function commandLand(branch, { cwd = process.cwd(), config, yes = false, 
   if (!entry || entry.isMain) throw new CopseError('land must run for a feature worktree or name a checked-out feature branch');
   branch = entry.branch;
   const state = worktreeState(entry.path);
+  const headOid = git(['rev-parse', 'HEAD'], { cwd: entry.path });
   let pr = pullRequestStatus(branch, { cwd: entry.path, run });
   if (!pr && createPr) {
     const created = createPullRequest(branch, { base: config.baseBranch, cwd: entry.path, run });
@@ -100,6 +101,8 @@ export function commandLand(branch, { cwd = process.cwd(), config, yes = false, 
     dirty: state.dirty,
     unpushed: state.unpushed,
     pr,
+    prBaseMatches: pr?.baseRefName === config.baseBranch,
+    prHeadMatches: pr?.headRefOid === headOid,
     checksGreen: pr?.checksGreen ?? false,
     dependencies: featureBlockers(coordination, branch),
   });
@@ -108,7 +111,7 @@ export function commandLand(branch, { cwd = process.cwd(), config, yes = false, 
     console.log(`Ready to merge PR #${pr.number} for ${branch}. Re-run with --yes to merge${cleanup ? ' and clean up' : ''}.`);
     return { ready: true, merged: false };
   }
-  const merged = mergePullRequest(branch, { cwd: entry.path, run });
+  const merged = mergePullRequest(pr.number, { headOid, cwd: entry.path, run });
   if (merged.status !== 0) throw new CopseError(`GitHub could not merge ${branch}`);
   if (coordination.features[branch]) {
     updateCoordination(coordinationPath, (current) => current.features[branch] ? releaseFeature(current, branch) : current);

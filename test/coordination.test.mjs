@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { closeSync, mkdirSync, mkdtempSync, openSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import {
+  closeSync, existsSync, mkdirSync, mkdtempSync, openSync, rmSync, symlinkSync, writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -11,6 +14,7 @@ import {
   leaseStatus,
   normalizeCoordination,
   refreshLease,
+  coordinationStatePath,
   releaseResources,
   reserveResources,
   releaseFeature,
@@ -19,6 +23,13 @@ import {
 } from '../src/coordination.mjs';
 
 const empty = () => ({ version: 1, features: {} });
+
+function gitRepo(root) {
+  const repo = join(root, 'repo');
+  mkdirSync(repo);
+  execFileSync('git', ['init', '-b', 'main', repo], { stdio: 'ignore' });
+  return repo;
+}
 
 test('claim records owner and dependencies', () => {
   const state = claimFeature(empty(), 'feat/ui', { owner: 'alice', dependsOn: ['feat/api'] });
@@ -40,6 +51,36 @@ test('atomic coordination update refuses a concurrent writer', () => {
     closeSync(lock);
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('committed coordination refuses a symlinked parent outside the worktree', () => {
+  const base = mkdtempSync(join(tmpdir(), 'copse-coordinate-symlink-'));
+  const repo = gitRepo(base);
+  const external = join(base, 'external-state');
+  mkdirSync(external);
+  symlinkSync(external, join(repo, 'state'));
+  try {
+    assert.throws(() => coordinationStatePath({
+      cwd: repo,
+      config: { coordinationBackend: 'committed', coordinationFile: 'state/features.json' },
+    }), /symlink/);
+    assert.equal(existsSync(join(external, 'features.json')), false);
+  } finally { rmSync(base, { recursive: true, force: true }); }
+});
+
+test('committed coordination keeps ordinary state inside the worktree', () => {
+  const base = mkdtempSync(join(tmpdir(), 'copse-coordinate-contained-'));
+  const repo = gitRepo(base);
+  try {
+    const path = coordinationStatePath({
+      cwd: repo,
+      config: { coordinationBackend: 'committed', coordinationFile: 'state/features.json' },
+    });
+    updateCoordination(path, (state) => claimFeature(state, 'feat/ui', { owner: 'alice' }));
+
+    assert.equal(path, join(repo, 'state', 'features.json'));
+    assert.equal(existsSync(path), true);
+  } finally { rmSync(base, { recursive: true, force: true }); }
 });
 
 test('atomic coordination update reclaims a lock owned by a dead local process', () => {

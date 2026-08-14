@@ -7,16 +7,29 @@ function json(command, args, { cwd, run = runCommand }) {
 }
 
 export function pullRequestStatus(branch, { cwd, run = runCommand } = {}) {
-  const rows = json('gh', ['pr', 'list', '--head', branch, '--state', 'open', '--limit', '1', '--json', 'number,state,statusCheckRollup'], { cwd, run });
+  const rows = json('gh', ['pr', 'list', '--head', branch, '--state', 'open', '--limit', '1', '--json', 'number,state,baseRefName,headRefOid,statusCheckRollup'], { cwd, run });
   const pr = rows?.[0];
   if (!pr) return null;
   const checks = pr.statusCheckRollup ?? [];
-  const green = checks.length > 0 && checks.every((check) => ['SUCCESS', 'SKIPPED', 'NEUTRAL'].includes(check.conclusion ?? check.state));
-  return { number: pr.number, state: pr.state, checksGreen: green };
+  const outcome = (check) => check.conclusion ?? check.state;
+  const allConclusive = checks.length > 0
+    && checks.every((check) => ['SUCCESS', 'SKIPPED', 'NEUTRAL'].includes(outcome(check)));
+  const verify = checks.filter((check) => (check.name ?? check.context) === 'verify');
+  const green = allConclusive && verify.length > 0
+    && verify.every((check) => outcome(check) === 'SUCCESS');
+  return {
+    number: pr.number,
+    state: pr.state,
+    baseRefName: pr.baseRefName,
+    headRefOid: pr.headRefOid,
+    checksGreen: green,
+  };
 }
 
-export function mergePullRequest(branch, { cwd, run = runCommand } = {}) {
-  return run('gh', ['pr', 'merge', branch, '--merge'], { cwd, inherit: true, allowFailure: true });
+export function mergePullRequest(number, { headOid, cwd, run = runCommand } = {}) {
+  return run('gh', ['pr', 'merge', String(number), '--merge', '--match-head-commit', headOid], {
+    cwd, inherit: true, allowFailure: true,
+  });
 }
 
 export function createPullRequest(branch, {

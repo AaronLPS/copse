@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { landBlockers } from '../src/decisions.mjs';
-import { createPullRequest, mergePullRequest } from '../src/github.mjs';
+import { createPullRequest, mergePullRequest, pullRequestStatus } from '../src/github.mjs';
 import { landRecoveryMessages } from '../src/commands/land.mjs';
 
 test('land blockers name unsafe state in priority order', () => {
@@ -13,11 +13,50 @@ test('land blockers name unsafe state in priority order', () => {
   assert.match(blockers.at(-1), /feat\/api/);
 });
 
-test('mergePullRequest invokes gh without a shell', () => {
+test('land blockers reject a PR with the wrong base or head commit', () => {
+  const common = {
+    legal: true, protectedBranch: false, dirty: false, unpushed: 0,
+    pr: { number: 17 }, checksGreen: true, dependencies: [],
+  };
+
+  assert.match(landBlockers({ ...common, prBaseMatches: false, prHeadMatches: true }).join('\n'), /configured base/);
+  assert.match(landBlockers({ ...common, prBaseMatches: true, prHeadMatches: false }).join('\n'), /head commit/);
+});
+
+test('pullRequestStatus requires a successful verify check and preserves PR identity', () => {
+  const responses = [
+    [{ number: 17, state: 'OPEN', baseRefName: 'main', headRefOid: 'abc123', statusCheckRollup: [{ name: 'lint', conclusion: 'SUCCESS' }] }],
+    [{ number: 17, state: 'OPEN', baseRefName: 'main', headRefOid: 'abc123', statusCheckRollup: [{ name: 'verify', conclusion: 'SKIPPED' }] }],
+    [{ number: 17, state: 'OPEN', baseRefName: 'main', headRefOid: 'abc123', statusCheckRollup: [{ name: 'verify', conclusion: 'SUCCESS' }, { context: 'verify', state: 'SKIPPED' }] }],
+    [{ number: 17, state: 'OPEN', baseRefName: 'main', headRefOid: 'abc123', statusCheckRollup: [{ name: 'verify', conclusion: 'SUCCESS' }] }],
+  ];
+  const calls = [];
+  const run = (command, args) => {
+    calls.push({ command, args });
+    return { ok: true, status: 0, stdout: JSON.stringify(responses.shift()), stderr: '' };
+  };
+
+  assert.equal(pullRequestStatus('feat/x', { cwd: '/repo', run }).checksGreen, false);
+  assert.equal(pullRequestStatus('feat/x', { cwd: '/repo', run }).checksGreen, false);
+  assert.equal(pullRequestStatus('feat/x', { cwd: '/repo', run }).checksGreen, false);
+  assert.deepEqual(pullRequestStatus('feat/x', { cwd: '/repo', run }), {
+    number: 17,
+    state: 'OPEN',
+    baseRefName: 'main',
+    headRefOid: 'abc123',
+    checksGreen: true,
+  });
+  for (const call of calls) {
+    assert.ok(call.args.at(-1).includes('baseRefName'));
+    assert.ok(call.args.at(-1).includes('headRefOid'));
+  }
+});
+
+test('mergePullRequest binds the verified PR number and head commit without a shell', () => {
   let seen;
-  const result = mergePullRequest('feat/x', { cwd: '/repo', run(command, args, options) { seen = { command, args, options }; return { status: 0 }; } });
+  const result = mergePullRequest(17, { headOid: 'abc123', cwd: '/repo', run(command, args, options) { seen = { command, args, options }; return { status: 0 }; } });
   assert.equal(result.status, 0);
-  assert.deepEqual(seen.args, ['pr', 'merge', 'feat/x', '--merge']);
+  assert.deepEqual(seen.args, ['pr', 'merge', '17', '--merge', '--match-head-commit', 'abc123']);
 });
 
 test('createPullRequest targets the configured base and preserves draft intent', () => {
