@@ -14,7 +14,7 @@
     "node": ">=20"
   },
   "bin": {
-    "copse": "./src/cli.mjs"
+    "copse": "src/cli.mjs"
   },
   "repository": {
     "type": "git",

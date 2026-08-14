@@ -243,6 +243,16 @@ let cleanupMutationComplete = false;
 let cleanupGrandchildPid = null;
 let acceptanceMessage = null;
 try {
+  const manifestDir = join(temp, 'manifest-normalization');
+  mkdirSync(manifestDir);
+  const sourceManifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+  writeFileSync(join(manifestDir, 'package.json'), JSON.stringify(sourceManifest, null, 2) + '\n');
+  run('npm', ['pkg', 'fix'], { cwd: manifestDir });
+  const normalizedManifest = JSON.parse(readFileSync(join(manifestDir, 'package.json'), 'utf8'));
+  if (!isDeepStrictEqual(normalizedManifest, sourceManifest)) {
+    throw new Error('package.json is not canonical for npm publish; run npm pkg fix');
+  }
+
   const packed = JSON.parse(run('npm', ['pack', '--json', '--pack-destination', temp], { cwd: root }));
   const artifactDir = join(temp, 'artifacts with spaces $;[packed]');
   mkdirSync(artifactDir);
