@@ -36,8 +36,8 @@ from GitHub, pin the package spec to a reviewed commit or tag.
 After the package is released, use the pinned release form separately:
 
 ```sh
-npx @aaronlps/copse@0.4.0 init --apply \
-  --runner-package @aaronlps/copse@0.4.0
+npx @aaronlps/copse@0.4.1 init --apply \
+  --runner-package @aaronlps/copse@0.4.1
 ```
 
 `--runner-package` stores `npx --yes <package-spec>` in `copse.config.json`, so
