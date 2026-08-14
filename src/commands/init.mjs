@@ -49,8 +49,11 @@ export function commandInit({ cwd = process.cwd(), config, apply = false, runner
   }
   const configPath = join(repoDir, CONFIG_FILENAME);
   const raw = existsSync(configPath) ? JSON.parse(readFileSync(configPath, 'utf8')) : null;
-  const previousDesired = desiredWiring(effective);
-  const previousGitHooks = desiredGitHooks(effective);
+  const previousEffective = raw && !Object.hasOwn(raw, 'runner')
+    ? { ...effective, runner: ['npx', '--yes', 'copse'] }
+    : effective;
+  const previousDesired = desiredWiring(previousEffective);
+  const previousGitHooks = desiredGitHooks(previousEffective);
   const requestedRunner = runnerPackage ? runnerForPackage(runnerPackage) : null;
   const rawWithInvocationOverrides = raw ? { ...raw, ciMode: config.ciMode } : effective;
   const requestedRaw = requestedRunner

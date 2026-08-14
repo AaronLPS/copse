@@ -9,7 +9,7 @@ function shellQuote(part) {
 }
 
 function runnerCommand(config) {
-  return (config.runner ?? ['npx', '--yes', 'copse']).map(shellQuote).join(' ');
+  return (config.runner ?? ['npx', '--yes', '@aaronlps/copse']).map(shellQuote).join(' ');
 }
 
 function canonicalDirectory(path) {

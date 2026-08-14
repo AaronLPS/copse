@@ -40,6 +40,11 @@ test('pre-push captures and replays stdin while quoting the runner', () => {
   assert.match(script, /'github:owner\/repo#abc'/);
 });
 
+test('missing runner renders the scoped package as one shell-quoted argv element', () => {
+  const script = desiredGitHooks({}).get('.copse/hooks/pre-commit');
+  assert.match(script, /'npx' '--yes' '@aaronlps\/copse' hook pre-commit/);
+});
+
 test('delegated paths resolve without cycles', () => {
   assert.equal(resolveDelegatedHook({
     previous: '.husky', event: 'pre-commit', root: '/repo', commonDir: '/repo/.git',

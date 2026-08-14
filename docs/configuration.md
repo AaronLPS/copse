@@ -14,7 +14,7 @@ keys and every invalid value are reported together.
 | `verify` | `[]` | array of non-empty argv arrays |
 | `agents` | Codex and Claude defaults | map of lowercase names to argv arrays |
 | `coordinationFile` | `.copse/features.json` | safe relative seed/documentation path |
-| `runner` | `npx --yes copse` | argv prefix used by generated forwards |
+| `runner` | `npx --yes @aaronlps/copse` | argv prefix used by generated forwards |
 | `leaseTimeoutSeconds` | `300` | positive integer; dead/expired sessions may be reclaimed |
 | `leaseHeartbeatSeconds` | `30` | positive integer shorter than the lease timeout |
 | `resources` | `{}` | feature branch to shared resource-name arrays |
@@ -76,7 +76,8 @@ npx github:AaronLPS/copse init --apply \
 After npm publication, select the pinned package release explicitly:
 
 ```sh
-npx copse@0.4.0 init --apply --runner-package copse@0.4.0
+npx @aaronlps/copse@0.4.0 init --apply \
+  --runner-package @aaronlps/copse@0.4.0
 ```
 
 copse itself dogfoods a checkout-local runner:

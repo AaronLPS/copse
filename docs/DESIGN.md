@@ -64,17 +64,17 @@ compounding. A template fork breaks that link at install; a machine-level
 binary has nowhere to put two projects that need different versions.
 
 Node is required on the machine. For a non-Node project that is the only cost —
-`npx copse` needs no dependency entry.
+`npx --yes @aaronlps/copse` needs no dependency entry.
 
 ### The governing constraint: delegate, never generate
 
 Everything copse writes into a consuming repo is a one-line forward:
 
 ```
-.githooks/pre-commit          exec npx copse hook pre-commit "$@"
-.githooks/pre-push            exec npx copse hook pre-push "$@"
-.github/workflows/ci.yml      <toolchain preamble> + npx copse verify
-.claude/settings.json         npx copse hook claude-<event>
+.githooks/pre-commit          exec npx --yes @aaronlps/copse hook pre-commit "$@"
+.githooks/pre-push            exec npx --yes @aaronlps/copse hook pre-push "$@"
+.github/workflows/ci.yml      <toolchain preamble> + npx --yes @aaronlps/copse verify
+.claude/settings.json         npx --yes @aaronlps/copse hook claude-<event>
 ```
 
 This is the answer to the problem every tool of this kind eventually has: the
@@ -262,7 +262,7 @@ part. copse does not pretend to cover every CI shape.
 `copse verify` runs `doctor` first. That single ordering makes every way the
 wiring can go missing fail loudly:
 
-- the package uninstalled → `npx copse verify` fails in CI
+- the package uninstalled → `npx --yes @aaronlps/copse verify` fails in CI
 - `.githooks/` deleted, or `core.hooksPath` unset → doctor refuses at step zero
 - the verify step removed from the workflow → the ruleset's required `ci` check
   goes missing and the pull request sits blocked-pending

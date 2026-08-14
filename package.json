@@ -1,6 +1,9 @@
 {
-  "name": "copse",
+  "name": "@aaronlps/copse",
   "version": "0.4.0",
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "Many agent sessions, one repository, no collisions.",
   "keywords": [
     "git",

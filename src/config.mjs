@@ -26,7 +26,7 @@ export const DEFAULTS = Object.freeze({
   verify: Object.freeze([]),
   agents: Object.freeze({ codex: Object.freeze(['codex']), claude: Object.freeze(['claude']) }),
   coordinationFile: '.copse/features.json',
-  runner: Object.freeze(['npx', '--yes', 'copse']),
+  runner: Object.freeze(['npx', '--yes', '@aaronlps/copse']),
   leaseTimeoutSeconds: 300,
   leaseHeartbeatSeconds: 30,
   resources: Object.freeze({}),

@@ -18,6 +18,11 @@ test('desired wiring covers Codex, Claude, instructions, coordination and CI', (
   assert.match(files.get('.github/workflows/copse.yml'), /git config core\.hooksPath \.copse\/hooks/);
 });
 
+test('missing runner renders the scoped package as one shell-quoted argv element in CI', () => {
+  const workflow = desiredWiring({ verify: [['npm', 'test']] }).get('.github/workflows/copse.yml');
+  assert.match(workflow, /'npx' '--yes' '@aaronlps\/copse' verify/);
+});
+
 test('CI runner is a JSON-quoted YAML scalar that extracts to the exact shell command', () => {
   const artifact = '/tmp/artifacts with spaces $;[packed]/copse.tgz';
   const workflow = desiredWiring({

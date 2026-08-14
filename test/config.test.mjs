@@ -113,7 +113,7 @@ test('framework configuration has safe defaults', () => {
   assert.deepEqual(config.verify, []);
   assert.deepEqual(config.agents, { codex: ['codex'], claude: ['claude'] });
   assert.equal(config.coordinationFile, '.copse/features.json');
-  assert.deepEqual(config.runner, ['npx', '--yes', 'copse']);
+  assert.deepEqual(config.runner, ['npx', '--yes', '@aaronlps/copse']);
   assert.equal(config.leaseTimeoutSeconds, 300);
   assert.equal(config.leaseHeartbeatSeconds, 30);
   assert.deepEqual(config.resources, {});
