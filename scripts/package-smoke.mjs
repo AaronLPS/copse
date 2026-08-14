@@ -246,6 +246,9 @@ try {
   const manifestDir = join(temp, 'manifest-normalization');
   mkdirSync(manifestDir);
   const sourceManifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+  if (sourceManifest.publishConfig?.access !== 'public') {
+    throw new Error('package.json must publish the scoped package with public access');
+  }
   writeFileSync(join(manifestDir, 'package.json'), JSON.stringify(sourceManifest, null, 2) + '\n');
   run('npm', ['pkg', 'fix'], { cwd: manifestDir });
   const normalizedManifest = JSON.parse(readFileSync(join(manifestDir, 'package.json'), 'utf8'));
@@ -564,6 +567,9 @@ process.exit(result.status ?? 1);
 
   const installedManifest = join(consumer, 'node_modules', '@aaronlps', 'copse', 'package.json');
   const installed = JSON.parse(readFileSync(installedManifest, 'utf8'));
+  if (installed.publishConfig?.access !== 'public') {
+    throw new Error('packed manifest must publish the scoped package with public access');
+  }
   acceptanceMessage = `package acceptance ok: ${installed.name} ${installed.version}, ${packed[0].files.length} files`;
 } catch (error) {
   if (!(error instanceof CleanupMutationComplete)) throw error;

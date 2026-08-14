@@ -19,7 +19,8 @@ import { commandRelease } from '../src/commands/release.mjs';
 import { commandStart } from '../src/commands/start.mjs';
 import { commandVerify } from '../src/commands/verify.mjs';
 import { coordinationStatePath, loadCoordination, saveCoordination } from '../src/coordination.mjs';
-import { legacyGitHooks } from '../src/git-hooks.mjs';
+import { desiredGitHooks, legacyGitHooks } from '../src/git-hooks.mjs';
+import { desiredWiring } from '../src/wiring.mjs';
 
 process.env.GIT_CONFIG_GLOBAL = '/dev/null';
 process.env.GIT_CONFIG_SYSTEM = '/dev/null';
@@ -54,6 +55,50 @@ test('init apply creates idempotent wiring that doctor accepts', () => {
     const second = commandInit({ cwd: repo, config, apply: true });
     assert.equal(second.created.length, 0);
     assert.equal(commandDoctor({ cwd: repo, config }).ok, true);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('init replaces legacy default wiring from a runner-omitting config without duplicating consumer hooks', () => {
+  const { root, repo } = makeRepo();
+  try {
+    const raw = { verify: [['npm', 'test']] };
+    const config = parseConfig(raw).config;
+    const legacyConfig = { ...config, ciMode: 'npm', runner: ['npx', '--yes', 'copse'] };
+    const legacyWiring = desiredWiring(legacyConfig);
+    const legacyHooks = desiredGitHooks(legacyConfig);
+    const consumerGroup = { matcher: 'complete', hooks: [{ type: 'command', command: 'consumer validate' }] };
+    writeFileSync(join(repo, 'copse.config.json'), JSON.stringify(raw, null, 2) + '\n');
+    for (const [relative, content] of [...legacyWiring, ...legacyHooks]) {
+      const path = join(repo, relative);
+      mkdirSync(join(path, '..'), { recursive: true });
+      writeFileSync(path, content, relative.startsWith('.copse/hooks/') ? { mode: 0o755 } : undefined);
+    }
+    const claudePath = join(repo, '.claude', 'settings.json');
+    const oldClaude = JSON.parse(readFileSync(claudePath, 'utf8'));
+    writeFileSync(claudePath, JSON.stringify({
+      ...oldClaude, hooks: { ...oldClaude.hooks, Stop: [consumerGroup] },
+    }, null, 2) + '\n');
+
+    const result = commandInit({ cwd: repo, config, apply: true });
+    const effectiveConfig = { ...config, ciMode: 'npm' };
+    const newWiring = desiredWiring(effectiveConfig);
+    const newClaude = JSON.parse(readFileSync(claudePath, 'utf8'));
+    const expectedClaude = JSON.parse(newWiring.get('.claude/settings.json'));
+
+    assert.deepEqual(result.conflicts, []);
+    for (const [relative, expected] of [...newWiring, ...desiredGitHooks(effectiveConfig)]) {
+      const actual = readFileSync(join(repo, relative), 'utf8');
+      if (['.codex/hooks.json', '.claude/settings.json', '.github/workflows/copse.yml'].includes(relative)
+          || relative.startsWith('.copse/hooks/')) {
+        assert.match(actual, /@aaronlps\/copse/, relative);
+      }
+      if (!relative.endsWith('settings.json')) assert.equal(actual, expected, relative);
+    }
+    assert.deepEqual(newClaude.hooks.Stop, [consumerGroup]);
+    assert.deepEqual(newClaude.hooks.SessionStart, expectedClaude.hooks.SessionStart);
+    assert.deepEqual(newClaude.hooks.PreToolUse, expectedClaude.hooks.PreToolUse);
+    assert.equal((JSON.stringify(newClaude).match(/@aaronlps\/copse/g) ?? []).length, 2);
+    assert.doesNotMatch(JSON.stringify(newClaude), /'copse'/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
