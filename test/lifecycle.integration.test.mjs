@@ -20,11 +20,12 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 import { parseConfig } from '../src/config.mjs';
 import { commandDoctor } from '../src/commands/doctor.mjs';
 import { commandDrop } from '../src/commands/drop.mjs';
+import { commandInit } from '../src/commands/init.mjs';
 import { commandList } from '../src/commands/list.mjs';
 import { commandNew, CopseError } from '../src/commands/new.mjs';
 import { driftNote } from '../src/decisions.mjs';
@@ -77,11 +78,11 @@ const config = parseConfig({
 }).config;
 
 function run(cmd, args, cwd) {
-  execFileSync(cmd, args, {
+  return execFileSync(cmd, args, {
     cwd,
     stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' },
-  });
+  }).toString().trim();
 }
 
 /** A repository with an `origin` that is a real bare repo on disk. */
@@ -116,6 +117,46 @@ function makeLocalRepo() {
   run('git', ['commit', '-m', 'first'], repo);
   return { root, repo };
 }
+
+test('a delegated hook non-zero status blocks the Git commit', () => {
+  const { root, repo } = makeRepo();
+  try {
+    const hookDir = join(repo, '.husky');
+    mkdirSync(hookDir);
+    writeFileSync(join(hookDir, 'pre-commit'), '#!/bin/sh\nexit 23\n', { mode: 0o755 });
+    run('git', ['config', 'core.hooksPath', '.husky'], repo);
+    const hookConfig = parseConfig({
+      baseBranch: 'devel', runner: [process.execPath, resolve('src/cli.mjs')],
+    }).config;
+    commandInit({ cwd: repo, config: hookConfig, apply: true });
+    run('git', ['switch', '-c', 'feat/delegated-failure'], repo);
+
+    assert.throws(() => run('git', ['commit', '--allow-empty', '-m', 'must fail'], repo));
+    assert.equal(run('git', ['log', '-1', '--pretty=%s'], repo), 'first');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('pre-push gives the delegated hook the same four-field ref line as copse', () => {
+  const { root, repo } = makeRepo();
+  try {
+    const hookDir = join(repo, '.husky');
+    mkdirSync(hookDir);
+    writeFileSync(join(hookDir, 'pre-push'), '#!/bin/sh\ncat > .delegated-push-input\n', { mode: 0o755 });
+    run('git', ['config', 'core.hooksPath', '.husky'], repo);
+    const hookConfig = parseConfig({
+      baseBranch: 'devel', runner: [process.execPath, resolve('src/cli.mjs')],
+    }).config;
+    commandInit({ cwd: repo, config: hookConfig, apply: true });
+    run('git', ['switch', '-c', 'feat/stdin'], repo);
+    run('git', ['commit', '--allow-empty', '-m', 'push stdin'], repo);
+    const head = run('git', ['rev-parse', 'HEAD'], repo);
+    const line = `refs/heads/feat/stdin ${head} refs/heads/feat/stdin 0000000000000000000000000000000000000000\n`;
+
+    run('git', ['push', '-u', 'origin', 'feat/stdin'], repo);
+
+    assert.equal(readFileSync(join(repo, '.delegated-push-input'), 'utf8'), line);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
 
 test('new uses the local base branch when origin is absent', () => {
   const { root, repo } = makeLocalRepo();

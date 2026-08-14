@@ -6,12 +6,17 @@
  * in one pass and exits non-zero if any are present.
  */
 import { accessSync, constants, existsSync, readFileSync } from 'node:fs';
-import { isAbsolute, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 
-import { carryPathState, git, mainWorktree, worktreeRoot, worktrees } from '../git.mjs';
+import {
+  carryPathState, git, gitCommonDir, mainWorktree, worktreeRoot, worktrees,
+} from '../git.mjs';
 import { driftNote } from '../decisions.mjs';
 import { CONFIG_FILENAME } from '../config.mjs';
-import { desiredWiring, wiringMatches } from '../wiring.mjs';
+import {
+  COPSE_HOOKS_PATH, desiredGitHooks, hooksPathPointsToCopse, resolveDelegatedHook,
+} from '../git-hooks.mjs';
+import { desiredWiring, gitHookFileState, wiringMatches } from '../wiring.mjs';
 import { coordinationStatePath, loadCoordination } from '../coordination.mjs';
 import { inspectListeningPort } from '../process.mjs';
 
@@ -65,8 +70,66 @@ export function commandDoctor({ cwd = process.cwd(), config, inspectPort = inspe
       if (!existsSync(path)) findings.push(`missing copse wiring: ${relative}`);
       else if (!wiringMatches(relative, readFileSync(path, 'utf8'), expected)) findings.push(`copse wiring differs: ${relative}`);
     }
-    const hooksPath = git(['config', '--local', '--get', 'core.hooksPath'], { cwd: wiringRoot, allowFailure: true });
-    if (hooksPath !== '.githooks') findings.push('git core.hooksPath is not .githooks');
+    const hooksPath = git(['config', '--get', 'core.hooksPath'], { cwd: wiringRoot, allowFailure: true });
+    const expandedHooksPath = git(['config', '--path', '--get', 'core.hooksPath'], {
+      cwd: wiringRoot, allowFailure: true,
+    });
+    const usesCopseHooks = hooksPathPointsToCopse({ hooksPath: expandedHooksPath, root: wiringRoot });
+    if (!usesCopseHooks) findings.push(`git core.hooksPath is not ${COPSE_HOOKS_PATH}`);
+    const hooksScopeLine = git(['config', '--show-scope', '--get', 'core.hooksPath'], {
+      cwd: wiringRoot, allowFailure: true,
+    });
+    const hooksScope = hooksScopeLine?.match(/^(\S+)/)?.[1] ?? null;
+    if (hooksScope === 'worktree' && !usesCopseHooks) {
+      findings.push('worktree core.hooksPath overrides clone-local hook wiring');
+    }
+    for (const [relative, expected] of desiredGitHooks(config)) {
+      const path = join(wiringRoot, relative);
+      const state = gitHookFileState(wiringRoot, relative);
+      if (!state.exists) {
+        findings.push(`missing copse wiring: ${relative}`);
+        continue;
+      }
+      if (!state.safe || readFileSync(path, 'utf8') !== expected) {
+        findings.push(`copse wiring differs: ${relative}`);
+        continue;
+      }
+      try {
+        accessSync(path, constants.X_OK);
+      } catch {
+        findings.push(`copse hook is not executable: ${relative}`);
+      }
+    }
+    const previous = git(['config', '--local', '--get', 'copse.previousHooksPath'], {
+      cwd: wiringRoot, allowFailure: true,
+    });
+    if (previous) {
+      const commonDir = gitCommonDir({ cwd: wiringRoot });
+      let delegated = null;
+      try {
+        delegated = ['pre-commit', 'pre-push'].map((event) => ({
+          event,
+          path: resolveDelegatedHook({ previous, event, root: wiringRoot, commonDir }),
+        }));
+      } catch (error) {
+        findings.push(`git hook delegation cycle: ${error.message}`);
+      }
+      if (delegated) {
+        const delegatedDir = dirname(delegated[0].path);
+        if (!existsSync(delegatedDir)) {
+          findings.push(`delegated hook directory does not exist: ${previous}`);
+        } else {
+          for (const { event, path } of delegated) {
+            if (!existsSync(path)) continue;
+            try {
+              accessSync(path, constants.X_OK);
+            } catch {
+              findings.push(`delegated ${event} is not executable`);
+            }
+          }
+        }
+      }
+    }
     const runner = config.runner?.[0];
     if (runner?.includes('/') || isAbsolute(runner ?? '')) {
       const runnerPath = isAbsolute(runner) ? runner : resolve(wiringRoot, runner);

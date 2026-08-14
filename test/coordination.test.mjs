@@ -90,7 +90,7 @@ test('stale-lock reclamation serializes competing reclaimers', () => {
         if (pid !== 404) return true;
         try {
           updateCoordination(path, (current) => current, {
-            host: 'test-host', now: 2_000, processAlive: (candidate) => candidate !== 404,
+            host: 'test-host', now: 2_001, processAlive: (candidate) => candidate !== 404,
           });
         } catch (error) {
           competingError = error;

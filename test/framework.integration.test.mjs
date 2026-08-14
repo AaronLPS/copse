@@ -1,9 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync,
+  symlinkSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 import { parseConfig } from '../src/config.mjs';
 import { commandClaim } from '../src/commands/claim.mjs';
@@ -16,6 +19,7 @@ import { commandRelease } from '../src/commands/release.mjs';
 import { commandStart } from '../src/commands/start.mjs';
 import { commandVerify } from '../src/commands/verify.mjs';
 import { coordinationStatePath, loadCoordination, saveCoordination } from '../src/coordination.mjs';
+import { legacyGitHooks } from '../src/git-hooks.mjs';
 
 process.env.GIT_CONFIG_GLOBAL = '/dev/null';
 process.env.GIT_CONFIG_SYSTEM = '/dev/null';
@@ -45,10 +49,198 @@ test('init apply creates idempotent wiring that doctor accepts', () => {
     const first = commandInit({ cwd: repo, config, apply: true });
     assert.equal(first.conflicts.length, 0);
     assert.ok(existsSync(join(repo, '.codex/hooks.json')));
-    assert.equal(run(['config', '--local', '--get', 'core.hooksPath'], repo), '.githooks');
+    assert.equal(run(['config', '--local', '--get', 'core.hooksPath'], repo), '.copse/hooks');
+    assert.equal(run(['config', '--local', '--get', 'copse.previousHooksPath'], repo), '<default>');
     const second = commandInit({ cwd: repo, config, apply: true });
     assert.equal(second.created.length, 0);
     assert.equal(commandDoctor({ cwd: repo, config }).ok, true);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('init preserves and delegates an existing hooksPath', () => {
+  const { root, repo } = makeRepo();
+  try {
+    const hookDir = join(repo, '.husky');
+    mkdirSync(hookDir);
+    const original = '#!/bin/sh\nprintf delegated > .delegated-hook\n';
+    writeFileSync(join(hookDir, 'pre-commit'), original, { mode: 0o755 });
+    run(['config', 'core.hooksPath', '.husky'], repo);
+    const config = parseConfig({ verify: [['npm', 'test']], runner: [process.execPath, resolve('src/cli.mjs')] }).config;
+
+    commandInit({ cwd: repo, config, apply: true });
+
+    assert.equal(run(['config', '--get', 'core.hooksPath'], repo), '.copse/hooks');
+    assert.equal(run(['config', '--get', 'copse.previousHooksPath'], repo), '.husky');
+    assert.equal(readFileSync(join(hookDir, 'pre-commit'), 'utf8'), original);
+    run(['switch', '-c', 'feat/delegated-hook'], repo);
+    run(['commit', '--allow-empty', '-m', 'delegates'], repo);
+    assert.equal(readFileSync(join(repo, '.delegated-hook'), 'utf8'), 'delegated');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('init delegates the default Git hook directory without changing its hook', () => {
+  const { root, repo } = makeRepo();
+  try {
+    const hookPath = join(repo, '.git', 'hooks', 'pre-commit');
+    const original = '#!/bin/sh\nprintf default > .default-hook\n';
+    writeFileSync(hookPath, original, { mode: 0o755 });
+    const config = parseConfig({ verify: [['npm', 'test']], runner: [process.execPath, resolve('src/cli.mjs')] }).config;
+
+    commandInit({ cwd: repo, config, apply: true });
+
+    assert.equal(run(['config', '--get', 'copse.previousHooksPath'], repo), '<default>');
+    assert.equal(readFileSync(hookPath, 'utf8'), original);
+    run(['switch', '-c', 'feat/default-hook'], repo);
+    run(['commit', '--allow-empty', '-m', 'delegates default'], repo);
+    assert.equal(readFileSync(join(repo, '.default-hook'), 'utf8'), 'default');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('init migrates exact legacy v0.3 hooks without delegating back to .githooks', () => {
+  const { root, repo } = makeRepo();
+  try {
+    const config = parseConfig({ verify: [['npm', 'test']], runner: [process.execPath, resolve('src/cli.mjs')] }).config;
+    const legacy = legacyGitHooks(config);
+    for (const [relative, content] of legacy) {
+      const path = join(repo, relative);
+      mkdirSync(join(repo, '.githooks'), { recursive: true });
+      writeFileSync(path, content, { mode: 0o755 });
+    }
+    run(['config', 'core.hooksPath', '.githooks'], repo);
+
+    commandInit({ cwd: repo, config, apply: true });
+
+    assert.equal(run(['config', '--get', 'core.hooksPath'], repo), '.copse/hooks');
+    assert.equal(run(['config', '--get', 'copse.previousHooksPath'], repo), '<default>');
+    for (const [relative, content] of legacy) {
+      assert.equal(readFileSync(join(repo, relative), 'utf8'), content);
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a second init preserves the originally delegated hooksPath', () => {
+  const { root, repo } = makeRepo();
+  try {
+    mkdirSync(join(repo, '.husky'));
+    run(['config', 'core.hooksPath', '.husky'], repo);
+    const config = parseConfig({ verify: [['npm', 'test']] }).config;
+
+    commandInit({ cwd: repo, config, apply: true });
+    commandInit({ cwd: repo, config, apply: true });
+
+    assert.equal(run(['config', '--get', 'core.hooksPath'], repo), '.copse/hooks');
+    assert.equal(run(['config', '--get', 'copse.previousHooksPath'], repo), '.husky');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a wrapper conflict leaves the configured hooksPath unchanged', () => {
+  const { root, repo } = makeRepo();
+  try {
+    mkdirSync(join(repo, '.husky'));
+    mkdirSync(join(repo, '.copse', 'hooks'), { recursive: true });
+    writeFileSync(join(repo, '.copse', 'hooks', 'pre-commit'), '#!/bin/sh\necho custom\n', { mode: 0o755 });
+    run(['config', 'core.hooksPath', '.husky'], repo);
+    const config = parseConfig({ verify: [['npm', 'test']] }).config;
+
+    const result = commandInit({ cwd: repo, config, apply: true });
+
+    assert.ok(result.conflicts.includes('.copse/hooks/pre-commit'));
+    assert.equal(run(['config', '--get', 'core.hooksPath'], repo), '.husky');
+    assert.throws(() => run(['config', '--get', 'copse.previousHooksPath'], repo));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('init refuses a linked worktree core.hooksPath override and doctor diagnoses it', () => {
+  const { root, repo } = makeRepo();
+  try {
+    run(['config', 'extensions.worktreeConfig', 'true'], repo);
+    const linked = join(root, 'project-feat-worktree-hooks');
+    run(['worktree', 'add', '-b', 'feat/worktree-hooks', linked], repo);
+    mkdirSync(join(linked, '.husky'));
+    run(['config', '--worktree', 'core.hooksPath', '.husky'], linked);
+    const config = parseConfig({ verify: [['npm', 'test']] }).config;
+
+    const result = commandInit({ cwd: linked, config, apply: true });
+    const findings = commandDoctor({ cwd: linked, config }).findings.join('\n');
+
+    assert.equal(result.ok, false);
+    assert.ok(result.conflicts.includes('worktree core.hooksPath override'));
+    assert.equal(run(['config', '--get', 'core.hooksPath'], linked), '.husky');
+    assert.match(findings, /worktree core\.hooksPath overrides clone-local hook wiring/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('init expands a tilde hooksPath before storing and delegating it', () => {
+  const { root, repo } = makeRepo();
+  const originalHome = process.env.HOME;
+  try {
+    const fakeHome = join(root, 'home');
+    const hookDir = join(fakeHome, 'consumer-hooks');
+    mkdirSync(hookDir, { recursive: true });
+    const original = '#!/bin/sh\nprintf tilde > .tilde-hook\n';
+    writeFileSync(join(hookDir, 'pre-commit'), original, { mode: 0o755 });
+    process.env.HOME = fakeHome;
+    run(['config', 'core.hooksPath', '~/consumer-hooks'], repo);
+    const config = parseConfig({
+      verify: [['npm', 'test']], runner: [process.execPath, resolve('src/cli.mjs')],
+    }).config;
+
+    commandInit({ cwd: repo, config, apply: true });
+
+    assert.equal(run(['config', '--get', 'copse.previousHooksPath'], repo), hookDir);
+    assert.equal(readFileSync(join(hookDir, 'pre-commit'), 'utf8'), original);
+    run(['switch', '-c', 'feat/tilde-hook'], repo);
+    run(['commit', '--allow-empty', '-m', 'delegates tilde'], repo);
+    assert.equal(readFileSync(join(repo, '.tilde-hook'), 'utf8'), 'tilde');
+  } finally {
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('init runner package creates a config when one is absent', () => {
+  const { root, repo } = makeRepo();
+  try {
+    const config = parseConfig({ verify: [['npm', 'test']] }).config;
+    commandInit({
+      cwd: repo, config, apply: true, runnerPackage: 'github:AaronLPS/copse#b928453',
+    });
+    const saved = JSON.parse(readFileSync(join(repo, 'copse.config.json'), 'utf8'));
+    assert.deepEqual(saved.runner, ['npx', '--yes', 'github:AaronLPS/copse#b928453']);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('init runner package persists the exact package source', () => {
+  const { root, repo } = makeRepo();
+  try {
+    writeFileSync(join(repo, 'copse.config.json'), JSON.stringify({
+      baseBranch: 'main', carryFiles: ['.env'], verify: [['npm', 'test']], runner: ['old-runner'],
+    }, null, 2) + '\n');
+    writeFileSync(join(repo, '.env'), 'secret\n');
+    const loaded = parseConfig(JSON.parse(readFileSync(join(repo, 'copse.config.json'), 'utf8'))).config;
+    const result = commandInit({
+      cwd: repo, config: loaded, apply: true, runnerPackage: 'github:AaronLPS/copse#b928453',
+    });
+    const saved = JSON.parse(readFileSync(join(repo, 'copse.config.json'), 'utf8'));
+    assert.deepEqual(saved.runner, ['npx', '--yes', 'github:AaronLPS/copse#b928453']);
+    assert.deepEqual(saved.carryFiles, ['.env']);
+    assert.equal(result.configChanged, true);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('init keeps a selected CI mode when the config file already exists', () => {
+  const { root, repo } = makeRepo();
+  try {
+    writeFileSync(join(repo, 'copse.config.json'), JSON.stringify({
+      verify: [['npm', 'test']], ciMode: 'npm',
+    }, null, 2) + '\n');
+    const loaded = parseConfig(JSON.parse(readFileSync(join(repo, 'copse.config.json'), 'utf8'))).config;
+    const result = commandInit({ cwd: repo, config: { ...loaded, ciMode: 'pnpm' }, apply: true });
+    const workflow = readFileSync(join(repo, '.github/workflows/copse.yml'), 'utf8');
+    assert.equal(result.effectiveConfig.ciMode, 'pnpm');
+    assert.match(workflow, /pnpm install --frozen-lockfile/);
+    assert.doesNotMatch(workflow, /- run: npm install/m);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -182,6 +374,169 @@ test('doctor reports a configured local hook runner that cannot execute', () => 
     const result = commandDoctor({ cwd: repo, config });
     assert.equal(result.ok, false);
     assert.match(result.findings.join('\n'), /runner.*missing-copse/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('doctor reports a wrong current Git hooks path', () => {
+  const { root, repo } = makeRepo();
+  try {
+    const config = parseConfig({ verify: [['npm', 'test']] }).config;
+    commandInit({ cwd: repo, config, apply: true });
+    run(['config', 'core.hooksPath', '.husky'], repo);
+
+    const findings = commandDoctor({ cwd: repo, config }).findings.join('\n');
+
+    assert.match(findings, /git core\.hooksPath is not \.copse\/hooks/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('doctor reports a Git hook delegation cycle', () => {
+  const { root, repo } = makeRepo();
+  try {
+    const config = parseConfig({ verify: [['npm', 'test']] }).config;
+    commandInit({ cwd: repo, config, apply: true });
+    run(['config', 'copse.previousHooksPath', '.copse/hooks'], repo);
+
+    const findings = commandDoctor({ cwd: repo, config }).findings.join('\n');
+
+    assert.match(findings, /delegation cycle/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('init and doctor normalize equivalent Copse hook paths without persisting a cycle', () => {
+  const { root, repo } = makeRepo();
+  try {
+    mkdirSync(join(repo, '.copse', 'hooks'), { recursive: true });
+    run(['config', 'core.hooksPath', './.copse/../.copse/hooks'], repo);
+    const config = parseConfig({ verify: [['npm', 'test']] }).config;
+
+    commandInit({ cwd: repo, config, apply: true });
+
+    assert.equal(run(['config', '--get', 'copse.previousHooksPath'], repo), '<default>');
+    run(['config', 'core.hooksPath', join(repo, '.copse', 'hooks')], repo);
+    assert.equal(commandDoctor({ cwd: repo, config }).ok, true);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('rendered Git wrapper refuses a symlink delegation back to its physical directory', () => {
+  const { root, repo } = makeRepo();
+  try {
+    const config = parseConfig({
+      verify: [['npm', 'test']], runner: [process.execPath, resolve('src/cli.mjs')],
+    }).config;
+    commandInit({ cwd: repo, config, apply: true });
+    symlinkSync(join(repo, '.copse', 'hooks'), join(repo, '.hook-alias'));
+    run(['config', 'copse.previousHooksPath', '.hook-alias'], repo);
+    run(['switch', '-c', 'feat/hook-cycle'], repo);
+
+    assert.throws(
+      () => run(['commit', '--allow-empty', '-m', 'must refuse cycle'], repo),
+      (error) => /delegation cycle/.test(error.stderr),
+    );
+    assert.match(commandDoctor({ cwd: repo, config }).findings.join('\n'), /delegation cycle/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('doctor reports a missing configured delegated hook directory', () => {
+  const { root, repo } = makeRepo();
+  try {
+    const config = parseConfig({ verify: [['npm', 'test']] }).config;
+    commandInit({ cwd: repo, config, apply: true });
+    run(['config', 'copse.previousHooksPath', '.husky'], repo);
+
+    const findings = commandDoctor({ cwd: repo, config }).findings.join('\n');
+
+    assert.match(findings, /delegated hook directory does not exist: \.husky/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('doctor reports a present delegated hook that is not executable', () => {
+  const { root, repo } = makeRepo();
+  try {
+    const config = parseConfig({ verify: [['npm', 'test']] }).config;
+    commandInit({ cwd: repo, config, apply: true });
+    mkdirSync(join(repo, '.husky'));
+    writeFileSync(join(repo, '.husky', 'pre-commit'), '#!/bin/sh\nexit 0\n');
+    chmodSync(join(repo, '.husky', 'pre-commit'), 0o644);
+    run(['config', 'copse.previousHooksPath', '.husky'], repo);
+
+    const findings = commandDoctor({ cwd: repo, config }).findings.join('\n');
+
+    assert.match(findings, /delegated pre-commit is not executable/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('doctor reports a missing absolute delegated hook directory', () => {
+  const { root, repo } = makeRepo();
+  try {
+    const config = parseConfig({ verify: [['npm', 'test']] }).config;
+    commandInit({ cwd: repo, config, apply: true });
+    const missing = join(root, 'removed-hooks');
+    run(['config', 'copse.previousHooksPath', missing], repo);
+
+    const findings = commandDoctor({ cwd: repo, config }).findings.join('\n');
+
+    assert.match(findings, new RegExp(`delegated hook directory does not exist: ${missing.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('doctor accepts an existing delegated directory with no hook files', () => {
+  const { root, repo } = makeRepo();
+  try {
+    const config = parseConfig({ verify: [['npm', 'test']] }).config;
+    commandInit({ cwd: repo, config, apply: true });
+    mkdirSync(join(repo, '.husky'));
+    run(['config', 'copse.previousHooksPath', '.husky'], repo);
+
+    const result = commandDoctor({ cwd: repo, config });
+
+    assert.equal(result.ok, true);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('doctor reports a non-executable Copse wrapper and init repairs its mode', () => {
+  const { root, repo } = makeRepo();
+  try {
+    const config = parseConfig({ verify: [['npm', 'test']] }).config;
+    commandInit({ cwd: repo, config, apply: true });
+    const wrapper = join(repo, '.copse', 'hooks', 'pre-commit');
+    chmodSync(wrapper, 0o644);
+
+    const broken = commandDoctor({ cwd: repo, config });
+    assert.match(broken.findings.join('\n'), /copse hook is not executable: \.copse\/hooks\/pre-commit/);
+
+    const repaired = commandInit({ cwd: repo, config, apply: true });
+    assert.ok(repaired.updated.includes('.copse/hooks/pre-commit'));
+    assert.equal(commandDoctor({ cwd: repo, config }).ok, true);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('doctor reports each missing Copse Git wrapper', () => {
+  const { root, repo } = makeRepo();
+  try {
+    const config = parseConfig({ verify: [['npm', 'test']] }).config;
+    commandInit({ cwd: repo, config, apply: true });
+    rmSync(join(repo, '.copse', 'hooks', 'pre-commit'));
+    rmSync(join(repo, '.copse', 'hooks', 'pre-push'));
+
+    const findings = commandDoctor({ cwd: repo, config }).findings.join('\n');
+
+    assert.match(findings, /missing copse wiring: \.copse\/hooks\/pre-commit/);
+    assert.match(findings, /missing copse wiring: \.copse\/hooks\/pre-push/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('doctor reports byte drift in a Copse Git wrapper', () => {
+  const { root, repo } = makeRepo();
+  try {
+    const config = parseConfig({ verify: [['npm', 'test']] }).config;
+    commandInit({ cwd: repo, config, apply: true });
+    const wrapper = join(repo, '.copse', 'hooks', 'pre-commit');
+    writeFileSync(wrapper, `${readFileSync(wrapper, 'utf8')}# drift\n`, { mode: 0o755 });
+
+    const findings = commandDoctor({ cwd: repo, config }).findings.join('\n');
+
+    assert.match(findings, /copse wiring differs: \.copse\/hooks\/pre-commit/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

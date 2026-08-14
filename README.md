@@ -19,25 +19,29 @@ schedule models, or automatically resolve semantic merge conflicts.
 
 ## Quickstart
 
-copse requires Node 20 or newer and has no runtime dependencies. It is not yet
-published to npm, so run the current repository version directly:
+copse requires Node 20 or newer and has no runtime dependencies. Bootstrap the
+current GitHub distribution and persist that exact source in every generated
+forward with one command:
 
 ```sh
-npx github:AaronLPS/copse init
-npx github:AaronLPS/copse init --apply
+npx github:AaronLPS/copse init --apply \
+  --runner-package github:AaronLPS/copse
 ```
 
-The first command reports what is missing or conflicting. `--apply` creates
-only absent wiring, merges copse hooks into existing Codex/Claude settings, and
-never overwrites a consumer-owned instruction or workflow file.
+For a read-only preview, omit `--apply`. The apply form creates only absent
+wiring, merges copse hooks into existing Codex/Claude settings, and never
+overwrites a consumer-owned instruction or workflow file. For production use
+from GitHub, pin the package spec to a reviewed commit or tag.
 
-For repeated use before the npm release, set the generated runner explicitly:
+After the package is released, use the pinned release form separately:
 
-```json
-{
-  "runner": ["npx", "--yes", "github:AaronLPS/copse"]
-}
+```sh
+npx copse@0.4.0 init --apply --runner-package copse@0.4.0
 ```
+
+`--runner-package` stores `npx --yes <package-spec>` in `copse.config.json`, so
+Git, Codex, Claude, and CI keep invoking the selected distribution rather than
+depending on the temporary path used by `npx` during bootstrap.
 
 Then start isolated work:
 
@@ -76,7 +80,8 @@ the backstop when agent hooks are disabled or untrusted.
 ## Commands
 
 ```text
-copse init [--apply] [--ci mode]     inspect/apply repository wiring
+copse init [--apply] [--ci mode] [--runner-package spec]
+                                      inspect/apply repository wiring
 copse new <branch>                   create a worktree and carry local files
 copse start <branch> [--agent name]  create/find it and launch an agent
 copse claim <branch> [options]       record owner and dependencies
@@ -135,6 +140,12 @@ them. Claude Code exposes its project hooks through its own `/hooks` browser.
 The generated commands delegate to the configured `runner`, so upgrades live
 in the package rather than copied hook implementations.
 
+Git hook wrappers live in `.copse/hooks`. During onboarding, copse records the
+previous active hook path in clone-local `copse.previousHooksPath`, then runs
+that hook after copse policy succeeds. Existing Husky or custom hook files are
+not edited; the `<default>` value represents the clone's standard `.git/hooks`
+directory.
+
 By default live ownership, leases, and resources are stored in Git's common directory at
 `.git/copse/features.json`, immediately visible from all worktrees without
 dirtying a branch. `coordinationBackend: "committed"` instead writes the
@@ -150,8 +161,23 @@ the listening process PID and working directory when `lsof` is available.
 npm test                 # unit and real-Git integration tests
 npm run check            # syntax-check every module
 npm run test:coverage    # coverage report
-npm run test:package     # pack, install, and invoke the published artifact
+npm run test:package     # packed consumer plus deterministic two-agent acceptance
 ```
+
+The packed acceptance launches fixture `codex` and `claude` commands in two
+concurrent feature worktrees; it exercises isolation and leases without using
+vendor authentication or quota. Authenticated vendor acceptance is deliberately
+opt-in and is never run by ordinary `copse verify`:
+
+```sh
+COPSE_LIVE_AGENT_TEST=1 \
+COPSE_CODEX_COMMAND='["codex"]' \
+COPSE_CLAUDE_COMMAND='["claude"]' \
+npm run test:agents:live
+```
+
+The live command can consume Codex and Claude quota. Each command variable must
+be a non-empty JSON argv array; review the vendors' project-hook trust prompts.
 
 The CI matrix runs Node 20, 22, and 24, cancels superseded runs, uses
 least-privilege permissions, runs the full local `copse verify` path, records

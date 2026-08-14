@@ -1,0 +1,27 @@
+#!/bin/sh
+root=$(git rev-parse --show-toplevel) || exit 1
+cd "$root" || exit 1
+'node' 'src/cli.mjs' hook pre-commit "$@" || exit $?
+previous=$(git config --local --get copse.previousHooksPath || true)
+[ -n "$previous" ] || exit 0
+commonDir=$(git rev-parse --git-common-dir) || exit 1
+case "$commonDir" in
+  /*) ;;
+  *) commonDir="$root/$commonDir" ;;
+esac
+case "$previous" in
+  '<default>') delegatedDir="$commonDir/hooks" ;;
+  /*) delegatedDir="$previous" ;;
+  *) delegatedDir="$root/$previous" ;;
+esac
+copsePhysical=$(CDPATH= cd -P "$root/.copse/hooks" 2>/dev/null && pwd -P)
+delegatedPhysical=$(CDPATH= cd -P "$delegatedDir" 2>/dev/null && pwd -P)
+if [ -n "$copsePhysical" ] && [ "$delegatedPhysical" = "$copsePhysical" ]; then
+  echo 'copse: Git hook delegation cycle points back to .copse/hooks' >&2
+  exit 1
+fi
+delegated="$delegatedDir/pre-commit"
+[ -x "$delegated" ] || exit 0
+"$delegated" "$@"
+status=$?
+exit "$status"

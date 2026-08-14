@@ -1,5 +1,8 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import {
+  accessSync, chmodSync, constants, existsSync, lstatSync, mkdirSync, readFileSync, renameSync,
+  writeFileSync,
+} from 'node:fs';
+import { dirname, join, resolve, sep } from 'node:path';
 
 export function detectCiMode(root) {
   if (existsSync(join(root, 'pnpm-lock.yaml'))) return 'pnpm';
@@ -25,7 +28,7 @@ function ciSetupLines(config) {
         : mode === 'custom'
           ? (config.ciSetup ?? [])
           : [];
-  return commands.map((argv) => `      - run: ${shellCommand(argv)}\n`).join('');
+  return commands.map((argv) => `      - run: ${JSON.stringify(shellCommand(argv))}\n`).join('');
 }
 
 export function desiredWiring(config) {
@@ -39,7 +42,6 @@ export function desiredWiring(config) {
 - Never remove worktrees with raw Git; use \`copse drop\` so carried files are rescued.
 `;
   const enterRoot = 'cd "$(git rev-parse --show-toplevel)"';
-  const hook = (event) => `#!/bin/sh\n${enterRoot} || exit 1\nexec ${forward} hook ${event} "$@"\n`;
   const agentCommand = (event) => `${enterRoot} && exec ${forward} hook ${event} --protocol 1`;
   const agentHooks = (projectRoot) => JSON.stringify({
     hooks: {
@@ -48,11 +50,9 @@ export function desiredWiring(config) {
     },
     ...(projectRoot ? { $schema: 'https://json.schemastore.org/claude-code-settings.json' } : {}),
   }, null, 2) + '\n';
-  const workflow = `name: copse\n\non:\n  pull_request:\n  push:\n    branches: [${config.baseBranch ?? 'main'}]\n\npermissions:\n  contents: read\n\nconcurrency:\n  group: copse-\${{ github.workflow }}-\${{ github.ref }}\n  cancel-in-progress: true\n\njobs:\n  verify:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 20\n${ciSetupLines(config)}      - run: git config core.hooksPath .githooks\n      - run: ${forward} verify\n`;
+  const workflow = `name: copse\n\non:\n  pull_request:\n  push:\n    branches: [${config.baseBranch ?? 'main'}]\n\npermissions:\n  contents: read\n\nconcurrency:\n  group: copse-\${{ github.workflow }}-\${{ github.ref }}\n  cancel-in-progress: true\n\njobs:\n  verify:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 20\n${ciSetupLines(config)}      - run: ${JSON.stringify('git config core.hooksPath .copse/hooks')}\n      - run: ${JSON.stringify(`${forward} verify`)}\n`;
   const state = JSON.stringify({ version: 1, features: {} }, null, 2) + '\n';
   const files = new Map([
-    ['.githooks/pre-commit', hook('pre-commit')],
-    ['.githooks/pre-push', hook('pre-push')],
     ['.codex/hooks.json', agentHooks(false)],
     ['.claude/settings.json', agentHooks(true)],
     ['AGENTS.md', agentContract],
@@ -74,6 +74,41 @@ function agentSettingsPath(relative) {
   return relative === '.codex/hooks.json' || relative === '.claude/settings.json';
 }
 
+function gitHookPath(relative) { return relative.startsWith('.copse/hooks/'); }
+
+function executable(path) {
+  try {
+    accessSync(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function gitHookFileState(root, relative) {
+  const resolvedRoot = resolve(root);
+  const resolvedPath = resolve(root, relative);
+  if (!resolvedPath.startsWith(resolvedRoot + sep)) return { safe: false, exists: false };
+
+  const segments = relative.split('/');
+  let current = resolvedRoot;
+  for (let index = 0; index < segments.length; index += 1) {
+    current = join(current, segments[index]);
+    let stat;
+    try {
+      stat = lstatSync(current);
+    } catch (error) {
+      if (error.code === 'ENOENT') return { safe: true, exists: false };
+      return { safe: false, exists: false };
+    }
+    if (stat.isSymbolicLink()) return { safe: false, exists: true };
+    const leaf = index === segments.length - 1;
+    if (!leaf && !stat.isDirectory()) return { safe: false, exists: true };
+    if (leaf) return { safe: stat.isFile(), exists: true };
+  }
+  return { safe: false, exists: false };
+}
+
 function parseJson(text) { try { return JSON.parse(text); } catch { return null; } }
 
 function includesGroup(groups, wanted) {
@@ -81,9 +116,84 @@ function includesGroup(groups, wanted) {
   return Array.isArray(groups) && groups.some((group) => JSON.stringify(group) === encoded);
 }
 
+function runCommand(line) {
+  const scalar = line.match(/^\s*- run: (.+)$/)?.[1];
+  if (!scalar) return null;
+  try { return JSON.parse(scalar); } catch { return scalar; }
+}
+
+function structuralYamlLines(text) {
+  const lines = [];
+  let blockIndent = null;
+  for (const line of text.split('\n')) {
+    if (/^\s*(?:#.*)?$/.test(line)) continue;
+    const indent = line.match(/^\s*/)[0].length;
+    if (blockIndent !== null) {
+      if (indent > blockIndent) continue;
+      blockIndent = null;
+    }
+    lines.push({ indent, line });
+    if (/^\s*-\s*[|>](?:[1-9][+-]?|[+-][1-9]?)?\s*(?:#.*)?$/.test(line)
+        || /:\s*[|>](?:[1-9][+-]?|[+-][1-9]?)?\s*(?:#.*)?$/.test(line)) {
+      blockIndent = indent;
+    }
+  }
+  return lines;
+}
+
+function mappingKey(line) {
+  return line.match(/^\s*([^\s:#][^:]*)\s*:\s*(?:#.*)?$/)?.[1] ?? null;
+}
+
+function workflowJobCommands(text, wantedJob) {
+  const lines = structuralYamlLines(text);
+  const jobsIndex = lines.findIndex(({ indent, line }) => indent === 0 && mappingKey(line) === 'jobs');
+  if (jobsIndex === -1) return [];
+  let jobIndent = null;
+  let jobStart = -1;
+  for (let index = jobsIndex + 1; index < lines.length; index += 1) {
+    const { indent, line } = lines[index];
+    if (indent === 0) break;
+    if (jobIndent === null) jobIndent = indent;
+    if (indent === jobIndent && mappingKey(line) === wantedJob) {
+      jobStart = index + 1;
+      break;
+    }
+  }
+  if (jobStart === -1) return [];
+
+  let propertyIndent = null;
+  let stepsStart = -1;
+  for (let index = jobStart; index < lines.length; index += 1) {
+    const { indent, line } = lines[index];
+    if (indent <= jobIndent) break;
+    if (propertyIndent === null) propertyIndent = indent;
+    if (indent === propertyIndent && mappingKey(line) === 'steps') {
+      stepsStart = index + 1;
+      break;
+    }
+  }
+  if (stepsStart === -1) return [];
+
+  const commands = [];
+  let stepIndent = null;
+  for (let index = stepsStart; index < lines.length; index += 1) {
+    const { indent, line } = lines[index];
+    if (indent <= propertyIndent) break;
+    if (stepIndent === null) stepIndent = indent;
+    if (indent === stepIndent) {
+      const command = runCommand(line);
+      if (command !== null) commands.push(command);
+    }
+  }
+  return commands;
+}
+
 export function wiringMatches(relative, actual, expected) {
   if (relative === '.github/workflows/copse.yml') {
-    return actual === expected || (/^\s{2}verify:\s*$/m.test(actual) && /(?:copse|src\/cli\.mjs)[^\n]*\sverify\s*$/m.test(actual));
+    const expectedVerify = workflowJobCommands(expected, 'verify').at(-1);
+    return actual === expected || (expectedVerify !== undefined
+      && workflowJobCommands(actual, 'verify').includes(expectedVerify));
   }
   if (!agentSettingsPath(relative)) return actual === expected;
   const have = parseJson(actual);
@@ -105,22 +215,98 @@ function mergedAgentSettings(actual, expected) {
   return JSON.stringify(merged, null, 2) + '\n';
 }
 
-export function reconcileWiring(root, desired, { apply = false } = {}) {
+function hasStaleAgentGroups(actual, previous, expected) {
+  const have = parseJson(actual);
+  const old = parseJson(previous);
+  const want = parseJson(expected);
+  if (!have || !old || !want) return false;
+  return Object.entries(old.hooks ?? {}).some(([event, groups]) => {
+    const wanted = new Set((want.hooks?.[event] ?? []).map((group) => JSON.stringify(group)));
+    const present = new Set((have.hooks?.[event] ?? []).map((group) => JSON.stringify(group)));
+    return groups.some((group) => {
+      const encoded = JSON.stringify(group);
+      return !wanted.has(encoded) && present.has(encoded);
+    });
+  });
+}
+
+function replacedAgentSettings(actual, previous, expected) {
+  const have = parseJson(actual);
+  const old = parseJson(previous);
+  const want = parseJson(expected);
+  if (!have || !old || !want || typeof have !== 'object' || Array.isArray(have)) return null;
+  const merged = { ...have, hooks: { ...(have.hooks ?? {}) } };
+  if (!merged.$schema && want.$schema) merged.$schema = want.$schema;
+  const events = new Set([...Object.keys(old.hooks ?? {}), ...Object.keys(want.hooks ?? {})]);
+  for (const event of events) {
+    const oldGroups = new Set((old.hooks?.[event] ?? []).map((group) => JSON.stringify(group)));
+    const wantedGroups = new Set((want.hooks?.[event] ?? []).map((group) => JSON.stringify(group)));
+    const seenWanted = new Set();
+    merged.hooks[event] = (merged.hooks[event] ?? []).filter((group) => {
+      const encoded = JSON.stringify(group);
+      if (oldGroups.has(encoded) && !wantedGroups.has(encoded)) return false;
+      if (!wantedGroups.has(encoded)) return true;
+      if (seenWanted.has(encoded)) return false;
+      seenWanted.add(encoded);
+      return true;
+    });
+    for (const group of want.hooks?.[event] ?? []) {
+      const encoded = JSON.stringify(group);
+      if (!seenWanted.has(encoded)) {
+        merged.hooks[event].push(group);
+        seenWanted.add(encoded);
+      }
+    }
+  }
+  return JSON.stringify(merged, null, 2) + '\n';
+}
+
+export function reconcileWiring(root, desired, { apply = false, previousDesired = null } = {}) {
   const report = { missing: [], matching: [], conflicts: [], created: [], updated: [] };
   for (const [relative, content] of desired) {
     const path = join(root, relative);
-    if (!existsSync(path)) {
+    const hookState = gitHookPath(relative) ? gitHookFileState(root, relative) : null;
+    if (hookState && !hookState.safe) {
+      report.conflicts.push(relative);
+      continue;
+    }
+    const pathExists = hookState ? hookState.exists : existsSync(path);
+    if (!pathExists) {
       report.missing.push(relative);
       if (apply) {
         atomicWrite(path, content);
-        if (relative.startsWith('.githooks/')) chmodSync(path, 0o755);
+        if (relative.startsWith('.copse/hooks/')) chmodSync(path, 0o755);
         report.created.push(relative);
       }
     } else {
       const actual = readFileSync(path, 'utf8');
-      if (wiringMatches(relative, actual, content)) report.matching.push(relative);
+      const previous = previousDesired?.get(relative);
+      if (agentSettingsPath(relative) && previous !== undefined
+          && hasStaleAgentGroups(actual, previous, content)) {
+        if (apply) {
+          const merged = replacedAgentSettings(actual, previous, content);
+          if (merged) { atomicWrite(path, merged); report.updated.push(relative); }
+          else report.conflicts.push(relative);
+        } else report.conflicts.push(relative);
+        continue;
+      }
+      if (wiringMatches(relative, actual, content)) {
+        if (gitHookPath(relative) && !executable(path)) {
+          if (apply) {
+            chmodSync(path, 0o755);
+            report.updated.push(relative);
+          } else report.conflicts.push(relative);
+        } else report.matching.push(relative);
+      }
+      else if (apply && previous === actual) {
+        atomicWrite(path, content);
+        if (relative.startsWith('.copse/hooks/')) chmodSync(path, 0o755);
+        report.updated.push(relative);
+      }
       else if (apply && agentSettingsPath(relative)) {
-        const merged = mergedAgentSettings(actual, content);
+        const merged = previous === undefined
+          ? mergedAgentSettings(actual, content)
+          : replacedAgentSettings(actual, previous, content);
         if (merged) { atomicWrite(path, merged); report.updated.push(relative); }
         else report.conflicts.push(relative);
       } else report.conflicts.push(relative);

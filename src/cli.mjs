@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { writeSync } from 'node:fs';
+
 import { loadConfig } from './config.mjs';
 import { worktreeRoot } from './git.mjs';
 import { CopseError, commandNew } from './commands/new.mjs';
@@ -14,6 +16,7 @@ import { commandVerify } from './commands/verify.mjs';
 import { commandLand } from './commands/land.mjs';
 import { commandProtect } from './commands/protect.mjs';
 import { commandPr } from './commands/pr.mjs';
+import { runnerPackageFromArgv } from './runner.mjs';
 
 const USAGE = `
   copse init [--apply]                reconcile project wiring
@@ -32,7 +35,7 @@ const USAGE = `
 `;
 
 const DEBUG = !['', '0', undefined].includes(process.env.COPSE_DEBUG);
-function die(message) { console.error(`\n✗ ${message}\n`); process.exit(1); }
+function die(message) { writeSync(2, `\n✗ ${message}\n\n`); process.exit(1); }
 function valuesAfter(argv, flag) {
   const values = [];
   for (let i = 0; i < argv.length; i += 1) if (argv[i] === flag && argv[i + 1]) values.push(argv[++i]);
@@ -54,9 +57,14 @@ try {
   let status = 0;
   switch (command) {
     case 'init': {
-      const ciMode = valuesAfter(argv, '--ci')[0];
+      const marker = argv.indexOf('--');
+      const initArgv = marker === -1 ? argv : argv.slice(0, marker);
+      const ciMode = valuesAfter(initArgv, '--ci')[0];
       const initConfig = ciMode ? { ...config, ciMode } : config;
-      status = commandInit({ config: initConfig, apply: argv.includes('--apply') }).ok ? 0 : 1;
+      const runnerPackage = runnerPackageFromArgv(initArgv);
+      status = commandInit({
+        config: initConfig, apply: initArgv.includes('--apply'), runnerPackage,
+      }).ok ? 0 : 1;
       break;
     }
     case 'new': commandNew(argument, { config }); break;
